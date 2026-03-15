@@ -1,114 +1,78 @@
-"""Reference Poker44 miner with simple chunk-level behavioral heuristics."""
-
-# from __future__ import annotations
+"""Poker44 miner — ML-based bot detector with heuristic fallback."""
 
 import time
-from collections import Counter
 from typing import Tuple
 
 import bittensor as bt
 
 from poker44.base.miner import BaseMinerNeuron
+from poker44.miner_model.detector import BotDetector
 from poker44.validator.synapse import DetectionSynapse
 
 
 class Miner(BaseMinerNeuron):
     """
-    Reference heuristic miner.
+    Competitive Poker44 miner.
 
-    It aggregates simple behavior signals over each chunk and returns a bot-risk
-    score per chunk. The goal is not SOTA accuracy, but a deterministic and
-    explainable baseline that is meaningfully better than random.
+    Uses a trained GradientBoostingClassifier on chunk-level statistical
+    features extracted from the sanitized hand data received from validators.
+
+    Falls back to a calibrated variance-based heuristic if no model file
+    exists yet (train one with: python -m poker44.miner_model.train).
+
+    Key insight: bot chunks have LOW within-chunk variance (systematic
+    profiles), while human chunks are diverse → high variance.
     """
 
     def __init__(self, config=None):
-        super(Miner, self).__init__(config=config)
-        bt.logging.info("🤖 Heuristic Poker44 Miner started")
-        
-        # # Attach handlers after initialization
-        # self.axon.attach(
-        #     forward_fn = self.forward,
-        #     blacklist_fn = self.blacklist,
-        #     priority_fn = self.priority,
-        # )
-        # bt.logging.info("Attaching forward function to miner axon.")
-        
+        super().__init__(config=config)
+        self._detector = BotDetector()
+        if self._detector.is_model_loaded():
+            bt.logging.info("BotDetector: ML model loaded.")
+        else:
+            bt.logging.warning(
+                "BotDetector: no model found — using heuristic fallback. "
+                "Run `python -m poker44.miner_model.train` to train a model."
+            )
         bt.logging.info(f"Axon created: {self.axon}")
 
     async def forward(self, synapse: DetectionSynapse) -> DetectionSynapse:
-        """Assign one deterministic bot-risk score per chunk."""
         chunks = synapse.chunks or []
-        scores = [self.score_chunk(chunk) for chunk in chunks]
-        synapse.risk_scores = scores
-        synapse.predictions = [s >= 0.5 for s in scores]
-        bt.logging.info(f"Miner Predctions: {synapse.predictions}")
-        bt.logging.info(f"Scored {len(chunks)} chunks with heuristic risks.")
-        return synapse
 
-    @staticmethod
-    def _clamp01(value: float) -> float:
-        return max(0.0, min(1.0, value))
-
-    @classmethod
-    def _score_hand(cls, hand: dict) -> float:
-        actions = hand.get("actions") or []
-        players = hand.get("players") or []
-        streets = hand.get("streets") or []
-        outcome = hand.get("outcome") or {}
-
-        action_counts = Counter(action.get("action_type") for action in actions)
-        meaningful_actions = max(
-            1,
-            sum(
-                action_counts.get(kind, 0)
-                for kind in ("call", "check", "bet", "raise", "fold")
-            ),
+        validator_hotkey = (synapse.dendrite.hotkey if synapse.dendrite else "unknown")
+        total_hands = sum(len(c) for c in chunks)
+        bt.logging.info(
+            f"[QUERY] from={validator_hotkey} | chunks={len(chunks)} | hands={total_hands} | "
+            f"model={'ML' if self._detector.is_model_loaded() else 'heuristic'}"
         )
 
-        call_ratio = action_counts.get("call", 0) / meaningful_actions
-        check_ratio = action_counts.get("check", 0) / meaningful_actions
-        fold_ratio = action_counts.get("fold", 0) / meaningful_actions
-        raise_ratio = action_counts.get("raise", 0) / meaningful_actions
-        street_depth = len(streets) / 3.0
-        showdown_flag = 1.0 if outcome.get("showdown") else 0.0
+        scores = [self._detector.score_chunk(chunk) for chunk in chunks]
+        synapse.risk_scores = scores
+        synapse.predictions = [self._detector.predict_chunk(chunk) for chunk in chunks]
 
-        player_count_signal = 0.0
-        if players:
-            player_count_signal = (6 - min(len(players), 6)) / 4.0
-
-        score = 0.0
-        score += 0.32 * street_depth
-        score += 0.22 * showdown_flag
-        score += 0.18 * cls._clamp01(call_ratio / 0.35)
-        score += 0.12 * cls._clamp01(check_ratio / 0.30)
-        score += 0.08 * cls._clamp01(player_count_signal)
-        score -= 0.18 * cls._clamp01(fold_ratio / 0.55)
-        score -= 0.10 * cls._clamp01(raise_ratio / 0.20)
-
-        return cls._clamp01(score)
-
-    @classmethod
-    def score_chunk(cls, chunk: list[dict]) -> float:
-        if not chunk:
-            return 0.5
-
-        hand_scores = [cls._score_hand(hand) for hand in chunk]
-        avg_score = sum(hand_scores) / len(hand_scores)
-
-        return round(cls._clamp01(avg_score), 6)
+        bt.logging.info(f"[RESPONSE] scores={[round(s, 3) for s in scores]}")
+        return synapse
 
     async def blacklist(self, synapse: DetectionSynapse) -> Tuple[bool, str]:
-        """Determine whether to blacklist incoming requests."""
-        return self.common_blacklist(synapse)
+        incoming = (synapse.dendrite.hotkey if synapse.dendrite else "unknown")
+        bt.logging.info(f"[BLACKLIST CHECK] incoming hotkey={incoming}")
+        blocked, reason = self.common_blacklist(synapse)
+        if blocked:
+            bt.logging.warning(f"[BLACKLIST REJECTED] hotkey={incoming} reason={reason}")
+        else:
+            bt.logging.info(f"[BLACKLIST ALLOWED] hotkey={incoming} reason={reason}")
+        return blocked, reason
 
     async def priority(self, synapse: DetectionSynapse) -> float:
-        """Assign priority based on caller's stake."""
         return self.caller_priority(synapse)
 
 
 if __name__ == "__main__":
     with Miner() as miner:
-        bt.logging.info("Random miner running...")
         while True:
-            bt.logging.info(f"Miner UID: {miner.uid} | Incentive: {miner.metagraph.I[miner.uid]}")
+            bt.logging.info(
+                f"UID={miner.uid} | "
+                f"incentive={miner.metagraph.I[miner.uid]:.6f} | "
+                f"model={'ML' if miner._detector.is_model_loaded() else 'heuristic'}"
+            )
             time.sleep(5 * 60)

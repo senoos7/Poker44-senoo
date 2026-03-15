@@ -122,14 +122,14 @@ class BaseMinerNeuron(BaseNeuron):
 
         if whitelist:
             if hotkey in whitelist:
-                bt.logging.trace(f"Allowing whitelisted validator hotkey {hotkey}")
+                bt.logging.info(f"Allowing whitelisted validator hotkey {hotkey}")
                 return False, "Whitelisted validator hotkey"
             bt.logging.warning(f"Blacklisting non-whitelisted hotkey {hotkey}")
             return True, "Hotkey not in validator allowlist"
 
         if hotkey not in self.metagraph.hotkeys:
             if not self.config.blacklist.allow_non_registered:
-                bt.logging.trace(f"Blacklisting un-registered hotkey {hotkey}")
+                bt.logging.warning(f"Blacklisting un-registered hotkey {hotkey}")
                 return True, "Unrecognized hotkey"
             return False, "Non-registered hotkey allowed"
 
@@ -138,7 +138,7 @@ class BaseMinerNeuron(BaseNeuron):
             bt.logging.warning(f"Blacklisting a request from non-validator hotkey {hotkey}")
             return True, "Non-validator hotkey"
 
-        bt.logging.trace(f"Not blacklisting recognized hotkey {hotkey}")
+        bt.logging.info(f"Allowing recognized hotkey {hotkey}")
         return False, "Hotkey recognized"
 
     def caller_priority(self, synapse: DetectionSynapse) -> float:
