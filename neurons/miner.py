@@ -1,5 +1,6 @@
 """Poker44 miner — ML-based bot detector with heuristic fallback."""
 
+import json
 import time
 from typing import Tuple
 
@@ -40,17 +41,51 @@ class Miner(BaseMinerNeuron):
         chunks = synapse.chunks or []
 
         validator_hotkey = (synapse.dendrite.hotkey if synapse.dendrite else "unknown")
-        total_hands = sum(len(c) for c in chunks)
+        chunk_sizes = [len(c) for c in chunks]
+        total_hands = sum(chunk_sizes)
+
+        # --- INFO: always visible summary ---
         bt.logging.info(
             f"[QUERY] from={validator_hotkey} | chunks={len(chunks)} | hands={total_hands} | "
             f"model={'ML' if self._detector.is_model_loaded() else 'heuristic'}"
         )
 
+        # --- DEBUG: per-chunk sizes ---
+        bt.logging.debug(
+            f"[QUERY CHUNKS] sizes={chunk_sizes}"
+        )
+
+        # --- DEBUG: sample hand from the first chunk (shows available fields) ---
+        if chunks and chunks[0]:
+            sample_hand = chunks[0][0]
+            sample_keys = list(sample_hand.keys())
+            bt.logging.debug(
+                f"[QUERY SAMPLE HAND] keys={sample_keys}"
+            )
+            bt.logging.debug(
+                f"[QUERY SAMPLE HAND] data={json.dumps(sample_hand, default=str)}"
+            )
+
         scores = [self._detector.score_chunk(chunk) for chunk in chunks]
         synapse.risk_scores = scores
-        synapse.predictions = [self._detector.predict_chunk(chunk) for chunk in chunks]
+        predictions = [self._detector.predict_chunk(chunk) for chunk in chunks]
+        synapse.predictions = predictions
 
-        bt.logging.info(f"[RESPONSE] scores={[round(s, 3) for s in scores]}")
+        n_bot = sum(predictions)
+        n_human = len(predictions) - n_bot
+
+        # --- INFO: response summary ---
+        bt.logging.info(
+            f"[RESPONSE] chunks={len(chunks)} | predicted_bot={n_bot} | predicted_human={n_human} | "
+            f"scores={[round(s, 3) for s in scores]}"
+        )
+
+        # --- DEBUG: full per-chunk detail ---
+        for i, (chunk, score, pred) in enumerate(zip(chunks, scores, predictions)):
+            bt.logging.debug(
+                f"[CHUNK {i:02d}] hands={len(chunk)} | score={score:.4f} | prediction={'BOT' if pred else 'HUMAN'}"
+            )
+
         return synapse
 
     async def blacklist(self, synapse: DetectionSynapse) -> Tuple[bool, str]:

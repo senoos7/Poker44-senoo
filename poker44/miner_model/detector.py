@@ -17,10 +17,12 @@ Scoring strategy (matches the reward function):
 from __future__ import annotations
 
 import pickle
+import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+import bittensor as bt
 
 from poker44.miner_model.features import extract_chunk_features
 
@@ -44,14 +46,19 @@ class BotDetector:
 
     def _load_model(self) -> None:
         if self._model_path.exists():
+            bt.logging.info(f"[BotDetector] Found model file at {self._model_path} ({self._model_path.stat().st_size} bytes)")
             try:
                 with open(self._model_path, "rb") as f:
                     self._model = pickle.load(f)
+                bt.logging.info(f"[BotDetector] Model loaded successfully: {type(self._model).__name__}")
             except Exception as exc:
-                print(f"[BotDetector] Failed to load model ({exc}). Using heuristic fallback.")
+                bt.logging.error(
+                    f"[BotDetector] Failed to load model from {self._model_path}: {exc}\n"
+                    f"{traceback.format_exc()}"
+                )
                 self._model = None
         else:
-            print(f"[BotDetector] No model at {self._model_path}. Using heuristic fallback.")
+            bt.logging.warning(f"[BotDetector] No model file at {self._model_path}. Using heuristic fallback.")
 
     def is_model_loaded(self) -> bool:
         return self._model is not None
