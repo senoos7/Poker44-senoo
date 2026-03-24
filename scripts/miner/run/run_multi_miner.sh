@@ -28,7 +28,7 @@ MINER_SCRIPT="./neurons/miner.py"
 # Allowlisted validator hotkeys (space-separated).
 # If set: miners accept only these hotkeys (allowlist mode).
 # If empty: miners fall back to --blacklist.force_validator_permit (on-chain permit check).
-ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-5FZD47WhA1UaVicYAr7pGnWb2YQLMD7uViipDYN2r1AJ5ggD 5D9j5f7RV9hfK2aGVxspruj3e4eL1hc5XepUQqZTXEua62BJ}"
+ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-5FZD47WhA1UaVicYAr7pGnWb2YQLMD7uViipDYN2r1AJ5ggD 5D9j5f7RV9hfK2aGVxspruj3e4eL1hc5XepUQqZTXEua62BJ 5HWe7T96SrY4vRvaLmSoriUJ2CGvhRc559U1vZ1pNPuyz2VA 5EP9fmtknrTnDhQmLRY9ciFYoM7YZM8rPWvQ9J7yywEsn126}"
 
 # ----------------------------------------------------------------
 # Miner definitions — edit this section for your hotkeys/ports
@@ -89,7 +89,7 @@ start_all() {
     read -r hotkey port pm2_name <<< "$entry"
     echo "Starting miner: pm2=$pm2_name hotkey=$hotkey port=$port"
     pm2 delete "$pm2_name" 2>/dev/null || true
-    # shellcheck disable=SC2046
+    # shellcheck disable=SC2046rr
     pm2 start "$MINER_SCRIPT" \
       --name "$pm2_name" -- \
       $(miner_args "$hotkey" "$port")
