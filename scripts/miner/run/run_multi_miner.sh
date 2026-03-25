@@ -36,10 +36,10 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-5FZD47WhA1UaVicYAr7pGnWb
 # ----------------------------------------------------------------
 MINERS=(
   "poker-miner-26001 8091 poker44_miner_1"
-  "poker-miner-26002 8092 poker44_miner_2"
-  "poker-miner-26003 8093 poker44_miner_3"
-  "poker-miner-26004 8094 poker44_miner_4"
-  "poker-miner-26005 8095 poker44_miner_5"
+  # "poker-miner-26002 8092 poker44_miner_2"
+  # "poker-miner-26003 8093 poker44_miner_3"
+  # "poker-miner-26004 8094 poker44_miner_4"
+  # "poker-miner-26005 8095 poker44_miner_5"
   "poker-miner-26006 8096 poker44_miner_6"
   "poker-miner-26007 8097 poker44_miner_7"
   "poker-miner-26008 8098 poker44_miner_8"
@@ -50,6 +50,21 @@ MINERS=(
   "poker-miner-26013 8103 poker44_miner_13"
   "poker-miner-26014 8104 poker44_miner_14"
   "poker-miner-26015 8105 poker44_miner_15"
+  "poker-miner-26016 8106 poker44_miner_16"
+  "poker-miner-26017 8107 poker44_miner_17"
+  "poker-miner-26018 8108 poker44_miner_18"
+  "poker-miner-26019 8109 poker44_miner_19"
+  "poker-miner-26020 8110 poker44_miner_20"
+  "poker-miner-26021 8111 poker44_miner_21"
+  "poker-miner-26022 8112 poker44_miner_22"
+  "poker-miner-26023 8113 poker44_miner_23"
+  # "poker-miner-26024 8114 poker44_miner_24"
+  # "poker-miner-26025 8115 poker44_miner_25"
+  # "poker-miner-26026 8116 poker44_miner_26"
+  # "poker-miner-26027 8117 poker44_miner_27"
+  # "poker-miner-26028 8118 poker44_miner_28"
+  # "poker-miner-26029 8119 poker44_miner_29"
+  # "poker-miner-26030 8120 poker44_miner_30"
 )
 
 # ----------------------------------------------------------------
