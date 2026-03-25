@@ -28,7 +28,14 @@ MINER_SCRIPT="./neurons/miner.py"
 # Allowlisted validator hotkeys (space-separated).
 # If set: miners accept only these hotkeys (allowlist mode).
 # If empty: miners fall back to --blacklist.force_validator_permit (on-chain permit check).
-ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-5FZD47WhA1UaVicYAr7pGnWb2YQLMD7uViipDYN2r1AJ5ggD 5D9j5f7RV9hfK2aGVxspruj3e4eL1hc5XepUQqZTXEua62BJ 5HWe7T96SrY4vRvaLmSoriUJ2CGvhRc559U1vZ1pNPuyz2VA 5EP9fmtknrTnDhQmLRY9ciFYoM7YZM8rPWvQ9J7yywEsn126}"
+_DEFAULT_VALIDATOR_HOTKEYS=(
+  5FZD47WhA1UaVicYAr7pGnWb2YQLMD7uViipDYN2r1AJ5ggD
+  5D9j5f7RV9hfK2aGVxspruj3e4eL1hc5XepUQqZTXEua62BJ
+  5HWe7T96SrY4vRvaLmSoriUJ2CGvhRc559U1vZ1pNPuyz2VA
+  5EP9fmtknrTnDhQmLRY9ciFYoM7YZM8rPWvQ9J7yywEsn126
+  5HmkWGB5PVzKCNLB4QxWWHFVEHPAbKKxGyoXW7Evs38gs126
+)
+ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOTKEYS[*]}}"
 
 # ----------------------------------------------------------------
 # Miner definitions — edit this section for your hotkeys/ports
