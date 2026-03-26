@@ -189,8 +189,21 @@ def train_model(X: np.ndarray, y: np.ndarray):
     top_idx = np.argsort(importances)[::-1][:10]
     print("\n  Top 10 features by importance:")
     for rank, idx in enumerate(top_idx, 1):
-        name = CHUNK_FEATURE_NAMES[idx] if idx < len(CHUNK_FEATURE_NAMES) else f"feat_{idx}"
-        print(f"    {rank:>2}. {name:<35} {importances[idx]:.4f}")
+        feat_name = CHUNK_FEATURE_NAMES[idx] if idx < len(CHUNK_FEATURE_NAMES) else f"feat_{idx}"
+        print(f"    {rank:>2}. {feat_name:<35} {importances[idx]:.4f}")
+
+    # --- CRITICAL: set n_jobs=1 on all inner RandomForests before saving ---
+    # Training used n_jobs=-1 (all cores) for speed.
+    # Inference runs inside an async miner coroutine — joblib parallel workers
+    # cause "delayed should be used with Parallel" warnings and severe slowdowns.
+    # Setting n_jobs=1 here makes predict_proba() fully synchronous at inference time.
+    clf = model.named_steps["clf"]
+    for cal_clf in clf.calibrated_classifiers_:
+        if hasattr(cal_clf, "estimator"):
+            cal_clf.estimator.n_jobs = 1
+        if hasattr(cal_clf, "base_estimator"):       # sklearn < 1.2 compat
+            cal_clf.base_estimator.n_jobs = 1
+    print("\n  Set n_jobs=1 on all inner RandomForests (safe for async inference).")
 
     return model
 

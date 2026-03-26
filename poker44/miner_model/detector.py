@@ -81,7 +81,10 @@ class BotDetector:
     def _score_with_model(self, chunk: List[Dict[str, Any]]) -> float:
         feats = extract_chunk_features(chunk).reshape(1, -1)
         try:
-            prob = float(self._model.predict_proba(feats)[0, 1])
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                prob = float(self._model.predict_proba(feats)[0, 1])
         except AttributeError:
             prob = float(self._model.predict(feats)[0])
         return float(np.clip(prob, 0.0, 1.0))
