@@ -34,6 +34,7 @@ _DEFAULT_VALIDATOR_HOTKEYS=(
   5HWe7T96SrY4vRvaLmSoriUJ2CGvhRc559U1vZ1pNPuyz2VA
   5EP9fmtknrTnDhQmLRY9ciFYoM7YZM8rPWvQ9J7yywEsn126
   5HmkWGB5PVzKCNLB4QxWWHFVEHPAbKKxGyoXW7Evs38gs126
+  5E2LP6EnZ54m3wS8s1yPvD5c3xo71kQroBw7aUVK32TKeZ5u
 )
 ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOTKEYS[*]}}"
 
@@ -43,9 +44,9 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # ----------------------------------------------------------------
 MINERS=(
   "poker-miner-26001 8091 poker44_miner_1"
-  # "poker-miner-26002 8092 poker44_miner_2"
-  # "poker-miner-26003 8093 poker44_miner_3"
-  # "poker-miner-26004 8094 poker44_miner_4"
+  "poker-miner-26002 8092 poker44_miner_2" #vps1
+  "poker-miner-26003 8093 poker44_miner_3" #vps1
+  "poker-miner-26004 8094 poker44_miner_4" #vps1
   # "poker-miner-26005 8095 poker44_miner_5"
   # "poker-miner-26006 8096 poker44_miner_6"
   # "poker-miner-26007 8097 poker44_miner_7"
