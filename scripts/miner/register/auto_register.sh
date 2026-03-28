@@ -90,10 +90,11 @@ while true; do
 
     echo -e "${CYAN}[${timestamp}] Attempt #${attempt} — registering ${HOTKEY} on netuid ${NETUID}...${RESET}"
 
-    output=$(echo "${WALLET_PASSWORD}" | btcli subnet register \
+    output=$(timeout 120 btcli subnet register \
         --netuid "${NETUID}" \
         --wallet.name "${WALLET_NAME}" \
         --wallet.hotkey "${HOTKEY}" \
+        --wallet.password "${WALLET_PASSWORD}" \
         --subtensor.network "${NETWORK}" \
         --no_prompt 2>&1) || true
 
@@ -140,6 +141,13 @@ while true; do
     if echo "${output}" | grep -qiE "insufficient|balance|not enough"; then
         echo -e "${RED}${BOLD}✗ Insufficient balance. Top up your wallet and re-run.${RESET}"
         exit 1
+    fi
+
+    # ── Timeout (btcli hung) — retry immediately ─────────────
+    if echo "${output}" | grep -q "^$" && [[ ${#output} -lt 5 ]]; then
+        echo -e "${YELLOW}  btcli timed out or returned empty — retrying in 15s...${RESET}"
+        sleep 15
+        continue
     fi
 
     # ── Unknown error — short wait ───────────────────────────
