@@ -74,6 +74,16 @@ echo -e "  network    : ${NETWORK}"
 echo -e "  block time : ${BLOCK_TIME_SECS}s"
 echo ""
 
+# ── Check expect is available ─────────────────────────────────
+if ! command -v expect &>/dev/null; then
+    echo -e "${YELLOW}  'expect' not found. Installing...${RESET}"
+    sudo apt-get install -y expect 2>/dev/null || \
+    sudo yum install -y expect 2>/dev/null || {
+        echo -e "${RED}  Could not install expect. Run: sudo apt install expect${RESET}"
+        exit 1
+    }
+fi
+
 # ── Password ─────────────────────────────────────────────────
 if [[ -z "$WALLET_PASSWORD" ]]; then
     read -r -s -p "Wallet password: " WALLET_PASSWORD
@@ -90,13 +100,25 @@ while true; do
 
     echo -e "${CYAN}[${timestamp}] Attempt #${attempt} — registering ${HOTKEY} on netuid ${NETUID}...${RESET}"
 
-    output=$(timeout 120 btcli subnet register \
-        --netuid "${NETUID}" \
-        --wallet.name "${WALLET_NAME}" \
-        --wallet.hotkey "${HOTKEY}" \
-        --wallet.password "${WALLET_PASSWORD}" \
-        --subtensor.network "${NETWORK}" \
-        --no_prompt 2>&1) || true
+    # Use expect to handle btcli's interactive prompts:
+    #   "Do you want to continue? [y/n]" → y
+    #   "Enter your password:"           → WALLET_PASSWORD
+    output=$(expect -c "
+        log_user 1
+        set timeout 90
+        spawn btcli subnet register \
+            --netuid ${NETUID} \
+            --wallet.name ${WALLET_NAME} \
+            --wallet.hotkey ${HOTKEY} \
+            --subtensor.network ${NETWORK}
+        expect {
+            -re {Do you want to continue\?.*} { send \"y\r\"; exp_continue }
+            -re {Enter your password.*}        { send \"${WALLET_PASSWORD}\r\"; exp_continue }
+            -re {Decrypting}                   { exp_continue }
+            timeout                            { exit 3 }
+            eof
+        }
+    " 2>&1) || true
 
     echo "${output}"
 
@@ -143,9 +165,9 @@ while true; do
         exit 1
     fi
 
-    # ── Timeout (btcli hung) — retry immediately ─────────────
-    if echo "${output}" | grep -q "^$" && [[ ${#output} -lt 5 ]]; then
-        echo -e "${YELLOW}  btcli timed out or returned empty — retrying in 15s...${RESET}"
+    # ── Timeout ───────────────────────────────────────────────
+    if echo "${output}" | grep -qiE "timeout|exit 3"; then
+        echo -e "${YELLOW}  btcli timed out — retrying in 15s...${RESET}"
         sleep 15
         continue
     fi
