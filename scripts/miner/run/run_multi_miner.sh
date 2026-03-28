@@ -29,12 +29,15 @@ MINER_SCRIPT="./neurons/miner.py"
 # If set: miners accept only these hotkeys (allowlist mode).
 # If empty: miners fall back to --blacklist.force_validator_permit (on-chain permit check).
 _DEFAULT_VALIDATOR_HOTKEYS=(
-  5FZD47WhA1UaVicYAr7pGnWb2YQLMD7uViipDYN2r1AJ5ggD
-  5D9j5f7RV9hfK2aGVxspruj3e4eL1hc5XepUQqZTXEua62BJ
-  5HWe7T96SrY4vRvaLmSoriUJ2CGvhRc559U1vZ1pNPuyz2VA
-  5EP9fmtknrTnDhQmLRY9ciFYoM7YZM8rPWvQ9J7yywEsn126
-  5HmkWGB5PVzKCNLB4QxWWHFVEHPAbKKxGyoXW7Evs38gs126
   5E2LP6EnZ54m3wS8s1yPvD5c3xo71kQroBw7aUVK32TKeZ5u
+  5FxQcdsCXcNjWowQ63Y2oeMhN3JRQksejV3aHRr4XmtknM2k
+  5EP9fmtknrTnDhQmLRY9ciFYoM7YZM8rPWvQ9J7yywEsn126
+  5HWe7T96SrY4vRvaLmSoriUJ2CGvhRc559U1vZ1pNPuyz2VA
+  5CsvRJXuR955WojnGMdok1hbhffZyB4N5ocrv82f3p5A2zVp
+  5FZD47WhA1UaVicYAr7pGnWb2YQLMD7uViipDYN2r1AJ5ggD
+  5G9hfkx9wGB1CLMT9WXkpHSAiYzjZb5o1Boyq4KAdDhjwrc5
+  5HmkWGB5PVzKCNLB4QxWWHFVEHPAbKKxGyoXW7Evs38gs126
+  5D9j5f7RV9hfK2aGVxspruj3e4eL1hc5XepUQqZTXEua62BJ
 )
 ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOTKEYS[*]}}"
 
@@ -44,9 +47,9 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # ----------------------------------------------------------------
 MINERS=(
   "poker-miner-26001 8091 poker44_miner_1"
-  "poker-miner-26002 8092 poker44_miner_2" #vps1
-  "poker-miner-26003 8093 poker44_miner_3" #vps1
-  "poker-miner-26004 8094 poker44_miner_4" #vps1
+  "poker-miner-26002 8092 poker44_miner_2"
+  "poker-miner-26003 8093 poker44_miner_3"
+  "poker-miner-26004 8094 poker44_miner_4" 
   # "poker-miner-26005 8095 poker44_miner_5"
   # "poker-miner-26006 8096 poker44_miner_6"
   # "poker-miner-26007 8097 poker44_miner_7"
