@@ -29,11 +29,11 @@ class Miner(BaseMinerNeuron):
         super().__init__(config=config)
         self._detector = BotDetector()
         if self._detector.is_model_loaded():
-            bt.logging.info("BotDetector: ML model loaded.")
+            bt.logging.info(f"BotDetector: ML model loaded ({self._detector.model_label}).")
         else:
             bt.logging.warning(
                 "BotDetector: no model found — using heuristic fallback. "
-                "Run `python -m poker44.miner_model.train` to train a model."
+                "Run `python -m poker44.miner_model.train --version <version>` to train a model."
             )
         bt.logging.info(f"Axon created: {self.axon}")
 
@@ -47,7 +47,7 @@ class Miner(BaseMinerNeuron):
         # --- INFO: always visible summary ---
         bt.logging.info(
             f"[QUERY] from={validator_hotkey} | chunks={len(chunks)} | hands={total_hands} | "
-            f"model={'ML' if self._detector.is_model_loaded() else 'heuristic'}"
+            f"model={self._detector.model_label}"
         )
 
         # --- DEBUG: per-chunk sizes ---
@@ -108,6 +108,6 @@ if __name__ == "__main__":
             bt.logging.info(
                 f"UID={miner.uid} | "
                 f"incentive={miner.metagraph.I[miner.uid]:.6f} | "
-                f"model={'ML' if miner._detector.is_model_loaded() else 'heuristic'}"
+                f"model={miner._detector.model_label}"
             )
             time.sleep(5 * 60)

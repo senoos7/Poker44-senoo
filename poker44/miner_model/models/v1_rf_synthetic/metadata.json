@@ -1,0 +1,14 @@
+{
+  "version": "v1_rf_synthetic",
+  "description": "Baseline: RandomForest + CalibratedCV, trained on synthetic bot chunks (custom bot profiles only, no anti-shortcut filter applied to training data). This is the control group model.",
+  "trained_at": "2026-03-09",
+  "data_source": "synthetic",
+  "n_chunks": 2000,
+  "n_bot_chunks": 1000,
+  "n_human_chunks": 1000,
+  "chunk_size_range": [60, 120],
+  "bot_profiles": 15,
+  "model_type": "Pipeline(StandardScaler + CalibratedClassifierCV(RandomForest, isotonic, cv=3))",
+  "n_features": 60,
+  "notes": "Training data NOT filtered by anti-shortcut mechanism. Model may pick up simple patterns that the validator actively removes from its bot selection."
+}
