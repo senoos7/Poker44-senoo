@@ -56,9 +56,9 @@ MINERS=(
   "poker-miner-26014 8104 poker44_miner_14"
   "poker-miner-26016 8106 poker44_miner_16"
   "poker-miner-26017 8107 poker44_miner_17"
-  "poker-miner-26018 8108 poker44_miner_18"
+  # "poker-miner-26018 8108 poker44_miner_18"
   "poker-miner-26019 8109 poker44_miner_19"
-  "poker-miner-26020 8110 poker44_miner_20"
+  # "poker-miner-26020 8110 poker44_miner_20"
   "poker-miner-26021 8111 poker44_miner_21"
 )
 
