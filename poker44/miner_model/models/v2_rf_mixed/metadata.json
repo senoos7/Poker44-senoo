@@ -1,6 +1,6 @@
 {
   "version": "v2_rf_mixed",
-  "trained_at": "2026-03-29T08:22:07Z",
+  "trained_at": "2026-03-30T22:18:16Z",
   "data_source": "mixed",
   "n_chunks": 2000,
   "n_bot_chunks": 1000,
@@ -15,57 +15,57 @@
   "cv_ap_std": 0.0,
   "cv_acc_mean": 1.0,
   "cv_acc_std": 0.0,
-  "training_time_seconds": 1199.1,
+  "training_time_seconds": 1210.2,
   "top_features": [
     {
       "rank": 1,
       "name": "p25_aggression",
-      "importance": 0.1489
+      "importance": 0.1517
     },
     {
       "rank": 2,
-      "name": "p25_stack_mean",
-      "importance": 0.1175
+      "name": "mean_aggression",
+      "importance": 0.1107
     },
     {
       "rank": 3,
       "name": "std_raise_frac",
-      "importance": 0.0992
+      "importance": 0.1037
     },
     {
       "rank": 4,
-      "name": "mean_aggression",
-      "importance": 0.0973
+      "name": "mean_raise_frac",
+      "importance": 0.0989
     },
     {
       "rank": 5,
-      "name": "mean_stack_mean",
-      "importance": 0.0947
+      "name": "p25_raise_frac",
+      "importance": 0.075
     },
     {
       "rank": 6,
       "name": "p75_stack_mean",
-      "importance": 0.0808
+      "importance": 0.0657
     },
     {
       "rank": 7,
-      "name": "mean_stack_cv",
-      "importance": 0.0755
+      "name": "p25_stack_mean",
+      "importance": 0.0644
     },
     {
       "rank": 8,
-      "name": "p75_stack_cv",
-      "importance": 0.0578
+      "name": "mean_stack_mean",
+      "importance": 0.0639
     },
     {
       "rank": 9,
-      "name": "mean_raise_frac",
-      "importance": 0.0383
+      "name": "p25_amount_mean",
+      "importance": 0.0577
     },
     {
       "rank": 10,
-      "name": "p25_raise_frac",
-      "importance": 0.0312
+      "name": "std_fold_frac",
+      "importance": 0.0252
     }
   ],
   "description": "Uses build_mixed_labeled_chunks() \u2014 the same generator the validator uses. Bot chunks passed the anti-shortcut filter (no single feature achieves >70% accuracy). Model must learn subtle, high-order signals."
