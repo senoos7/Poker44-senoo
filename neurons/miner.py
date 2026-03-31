@@ -91,19 +91,34 @@ class Miner(BaseMinerNeuron):
                 f"[QUERY SAMPLE HAND] data={json.dumps(sample_hand, default=str)}"
             )
 
+        import asyncio
+        import traceback
+        loop = asyncio.get_event_loop()
+
         try:
-            scores = [self._detector.score_chunk(chunk) for chunk in chunks]
+            # Run CPU-bound inference in a thread pool so the asyncio event loop
+            # stays responsive (handles cancellation, heartbeats, other tasks).
+            # Without this, HistGBM inference blocks the entire event loop and the
+            # validator's timeout fires before the response is sent back.
+            scores = await loop.run_in_executor(
+                None,
+                lambda: [self._detector.score_chunk(chunk) for chunk in chunks],
+            )
             synapse.risk_scores = scores
-            predictions = [self._detector.predict_chunk(chunk) for chunk in chunks]
+            predictions = [score >= 0.5 for score in scores]
             synapse.predictions = predictions
             synapse.model_manifest = dict(self.model_manifest)
+        except asyncio.CancelledError:
+            bt.logging.warning(
+                f"[FORWARD CANCELLED] validator timed out after sending {len(chunks)} chunks "
+                f"— consider reducing VPS load or validator timeout"
+            )
+            raise
         except Exception as exc:
-            import traceback
             bt.logging.error(
                 f"[FORWARD ERROR] scoring failed for {len(chunks)} chunks: {exc}\n"
                 f"{traceback.format_exc()}"
             )
-            # Return zero scores so the validator records a response rather than a timeout.
             synapse.risk_scores = [0.0] * len(chunks)
             synapse.predictions = [False] * len(chunks)
             return synapse

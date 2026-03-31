@@ -1,6 +1,6 @@
 {
   "version": "v3_gb_mixed",
-  "trained_at": "2026-03-31T12:38:34Z",
+  "trained_at": "2026-03-31T18:43:17Z",
   "data_source": "mixed",
   "n_chunks": 4000,
   "n_bot_chunks": 2000,
@@ -15,7 +15,7 @@
   "cv_ap_std": 0.0,
   "cv_acc_mean": 1.0,
   "cv_acc_std": 0.0,
-  "training_time_seconds": 2290.0,
+  "training_time_seconds": 2261.6,
   "top_features": [],
   "description": "Uses build_mixed_labeled_chunks() \u2014 the same generator the validator uses. Bot chunks passed the anti-shortcut filter (no single feature achieves >70% accuracy). Model must learn subtle, high-order signals."
 }

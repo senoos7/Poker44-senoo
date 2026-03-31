@@ -60,14 +60,8 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # MODEL_VERSION is optional — omit or leave blank to use DEFAULT_MODEL_VERSION
 # ----------------------------------------------------------------
 MINERS=(
-  # All miners use v3_gb_mixed (76-feature HistGBM — retrained after feature expansion)
+  # All miners use v3_gb_mixed (76-feature HistGBM — required after feature expansion)
   # "poker-miner-26001 8091 poker44_miner_1  v3_gb_mixed"
-  "poker-miner-26002 8092 poker44_miner_2  v3_gb_mixed"
-  "poker-miner-26003 8093 poker44_miner_3  v3_gb_mixed"
-  "poker-miner-26004 8094 poker44_miner_4  v3_gb_mixed"
-  "poker-miner-26005 8095 poker44_miner_5  v3_gb_mixed"
-  "poker-miner-26006 8096 poker44_miner_6  v3_gb_mixed"
-  "poker-miner-26007 8097 poker44_miner_7  v3_gb_mixed"
   "poker-miner-26008 8098 poker44_miner_8  v3_gb_mixed"
   "poker-miner-26009 8099 poker44_miner_9  v3_gb_mixed"
   "poker-miner-26010 8100 poker44_miner_10 v3_gb_mixed"
@@ -81,7 +75,7 @@ MINERS=(
   "poker-miner-26018 8108 poker44_miner_18 v3_gb_mixed"
   "poker-miner-26019 8109 poker44_miner_19 v3_gb_mixed"
   "poker-miner-26020 8110 poker44_miner_20 v3_gb_mixed"
-  "poker-miner-26021 8111 poker44_miner_21 v3_gb_mixed"
+  # "poker-miner-26021 8111 poker44_miner_21 v3_gb_mixed"
   "poker-miner-26022 8112 poker44_miner_22 v3_gb_mixed"
   "poker-miner-26023 8113 poker44_miner_23 v3_gb_mixed"
 )
