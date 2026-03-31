@@ -3,16 +3,24 @@
 # run_multi_miner.sh — manage multiple Poker44 miners (pm2)
 #
 # Each miner entry needs a unique:
-#   HOTKEY      — bittensor hotkey name (under the same coldkey)
-#   AXON_PORT   — unique port per miner (default 8091+)
-#   PM2_NAME    — unique pm2 process name
+#   HOTKEY          — bittensor hotkey name (under the same coldkey)
+#   AXON_PORT       — unique port per miner (default 8091+)
+#   PM2_NAME        — unique pm2 process name
+#   MODEL_VERSION   — (optional) which model to load
+#                     Must match a folder under poker44/miner_model/models/
+#                     Leave blank or "-" to use DEFAULT_MODEL_VERSION
+#
+# A/B testing example:
+#   "poker-miner-26001 8091 poker44_miner_1  v1_rf_synthetic"   ← control
+#   "poker-miner-26002 8092 poker44_miner_2  v3_gb_mixed"       ← test
 #
 # Usage:
-#   ./scripts/miner/run/run_multi_miner.sh start    # start all miners
-#   ./scripts/miner/run/run_multi_miner.sh stop     # stop all miners
-#   ./scripts/miner/run/run_multi_miner.sh restart  # restart all miners
-#   ./scripts/miner/run/run_multi_miner.sh status   # show pm2 status
-#   ./scripts/miner/run/run_multi_miner.sh logs <name>  # tail logs for one miner
+#   ./scripts/miner/run/run_multi_miner.sh start
+#   ./scripts/miner/run/run_multi_miner.sh stop
+#   ./scripts/miner/run/run_multi_miner.sh restart
+#   ./scripts/miner/run/run_multi_miner.sh status
+#   ./scripts/miner/run/run_multi_miner.sh logs <pm2_name>
+#   ./scripts/miner/run/run_multi_miner.sh list
 # ============================================================
 
 set -e
@@ -25,9 +33,14 @@ NETWORK="${NETWORK:-finney}"
 NETUID="${NETUID:-126}"
 MINER_SCRIPT="./neurons/miner.py"
 
+# Python interpreter — set to venv python so PM2 uses the right env
+PYTHON="${PYTHON:-$(which python3)}"
+
+# Default model version — used when a miner entry has no 4th field.
+# Set to "" to use the legacy model.pkl default (MODEL_VERSION unset).
+DEFAULT_MODEL_VERSION="${DEFAULT_MODEL_VERSION:-v3_gb_mixed}"
+
 # Allowlisted validator hotkeys (space-separated).
-# If set: miners accept only these hotkeys (allowlist mode).
-# If empty: miners fall back to --blacklist.force_validator_permit (on-chain permit check).
 _DEFAULT_VALIDATOR_HOTKEYS=(
   5E2LP6EnZ54m3wS8s1yPvD5c3xo71kQroBw7aUVK32TKeZ5u
   5FxQcdsCXcNjWowQ63Y2oeMhN3JRQksejV3aHRr4XmtknM2k
@@ -43,13 +56,14 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 
 # ----------------------------------------------------------------
 # Miner definitions — edit this section for your hotkeys/ports
-# Each row: "HOTKEY AXON_PORT PM2_NAME"
+# Format: "HOTKEY AXON_PORT PM2_NAME [MODEL_VERSION]"
+# MODEL_VERSION is optional — omit or use "-" to use DEFAULT_MODEL_VERSION
 # ----------------------------------------------------------------
 MINERS=(
-  "poker-miner-26001 8091 poker44_miner_1 v3_gb_mixed"
-  "poker-miner-26002 8092 poker44_miner_2 v3_gb_mixed"
-  "poker-miner-26003 8093 poker44_miner_3 v3_gb_mixed"
-  "poker-miner-26004 8094 poker44_miner_4 v3_gb_mixed" 
+  "poker-miner-26001 8091 poker44_miner_1  v3_gb_mixed"
+  "poker-miner-26002 8092 poker44_miner_2  v3_gb_mixed"
+  "poker-miner-26003 8093 poker44_miner_3  v3_gb_mixed"
+  "poker-miner-26004 8094 poker44_miner_4  v3_gb_mixed"
   # "poker-miner-26011 8101 poker44_miner_11"
   # "poker-miner-26012 8102 poker44_miner_12"
   # "poker-miner-26013 8103 poker44_miner_13"
@@ -72,9 +86,21 @@ require_pm2() {
   fi
 }
 
-# Build miner args — mirrors the access-mode logic from run_miner.sh:
-#   ALLOWED_VALIDATOR_HOTKEYS set   → allowlist mode
-#   ALLOWED_VALIDATOR_HOTKEYS empty → force_validator_permit mode
+# Parse a miner entry into named variables.
+# Sets: _HOTKEY, _PORT, _PM2_NAME, _MODEL_VER
+parse_miner_entry() {
+  _HOTKEY=""
+  _PORT=""
+  _PM2_NAME=""
+  _MODEL_VER=""
+  read -r _HOTKEY _PORT _PM2_NAME _MODEL_VER <<< "$1"
+  # If MODEL_VER is empty or "-", use the default
+  if [ -z "$_MODEL_VER" ] || [ "$_MODEL_VER" = "-" ]; then
+    _MODEL_VER="$DEFAULT_MODEL_VERSION"
+  fi
+}
+
+# Build bittensor CLI args — allowlist mode or force_validator_permit fallback
 miner_args() {
   local hotkey="$1"
   local port="$2"
@@ -92,23 +118,31 @@ miner_args() {
   echo "$args"
 }
 
+# ----------------------------------------------------------------
+# Commands
+# ----------------------------------------------------------------
 start_all() {
   require_pm2
   export PYTHONPATH="$(pwd)"
   for entry in "${MINERS[@]}"; do
-    read -r hotkey port pm2_name <<< "$entry"
-    echo "Starting miner: pm2=$pm2_name hotkey=$hotkey port=$port"
-    pm2 delete "$pm2_name" 2>/dev/null || true
-    # shellcheck disable=SC2046rr
+    parse_miner_entry "$entry"
+    echo "Starting miner: pm2=$_PM2_NAME  hotkey=$_HOTKEY  port=$_PORT  model=$_MODEL_VER"
+    pm2 delete "$_PM2_NAME" 2>/dev/null || true
+
+    # Pass MODEL_VERSION into the PM2 process environment so it persists
+    # through restarts (PM2 snapshots the env at process creation time).
+    # shellcheck disable=SC2046
+    MODEL_VERSION="$_MODEL_VER" \
     pm2 start "$MINER_SCRIPT" \
-      --name "$pm2_name" -- \
-      $(miner_args "$hotkey" "$port")
+      --name "$_PM2_NAME" \
+      --interpreter "$PYTHON" \
+      -- $(miner_args "$_HOTKEY" "$_PORT")
   done
   pm2 save
   echo ""
   echo "All miners started. Check status: pm2 list"
   if [ -n "$ALLOWED_VALIDATOR_HOTKEYS" ]; then
-    echo "Access mode: validator allowlist ($ALLOWED_VALIDATOR_HOTKEYS)"
+    echo "Access mode: validator allowlist"
   else
     echo "Access mode: force_validator_permit (on-chain permit check)"
   fi
@@ -117,18 +151,21 @@ start_all() {
 stop_all() {
   require_pm2
   for entry in "${MINERS[@]}"; do
-    read -r hotkey port pm2_name <<< "$entry"
-    echo "Stopping: $pm2_name"
-    pm2 stop "$pm2_name" 2>/dev/null || echo "  (already stopped)"
+    parse_miner_entry "$entry"
+    echo "Stopping: $_PM2_NAME"
+    pm2 stop "$_PM2_NAME" 2>/dev/null || echo "  (already stopped)"
   done
 }
 
 restart_all() {
   require_pm2
   for entry in "${MINERS[@]}"; do
-    read -r hotkey port pm2_name <<< "$entry"
-    echo "Restarting: $pm2_name"
-    pm2 restart "$pm2_name" 2>/dev/null || echo "  (not running, starting instead)"
+    parse_miner_entry "$entry"
+    echo "Restarting: $_PM2_NAME  (model=$_MODEL_VER)"
+    # --update-env refreshes MODEL_VERSION in pm2's stored process env
+    MODEL_VERSION="$_MODEL_VER" \
+    pm2 restart "$_PM2_NAME" --update-env 2>/dev/null \
+      || echo "  ($_PM2_NAME not found — run 'start' first)"
   done
 }
 
@@ -143,12 +180,25 @@ logs_one() {
     echo "Usage: $0 logs <pm2_name>"
     echo "Available miners:"
     for entry in "${MINERS[@]}"; do
-      read -r hotkey port pm2_name <<< "$entry"
-      echo "  $pm2_name (hotkey=$hotkey port=$port)"
+      parse_miner_entry "$entry"
+      echo "  $_PM2_NAME  (hotkey=$_HOTKEY  port=$_PORT  model=$_MODEL_VER)"
     done
     exit 1
   fi
   pm2 logs "$name"
+}
+
+list_miners() {
+  echo "Configured miners:"
+  echo ""
+  printf "  %-28s %-6s %-26s %s\n" "PM2_NAME" "PORT" "HOTKEY" "MODEL_VERSION"
+  printf "  %-28s %-6s %-26s %s\n" "--------" "----" "------" "-------------"
+  for entry in "${MINERS[@]}"; do
+    parse_miner_entry "$entry"
+    printf "  %-28s %-6s %-26s %s\n" "$_PM2_NAME" "$_PORT" "$_HOTKEY" "$_MODEL_VER"
+  done
+  echo ""
+  echo "Default MODEL_VERSION: $DEFAULT_MODEL_VERSION"
 }
 
 # ----------------------------------------------------------------
@@ -160,14 +210,11 @@ case "${1:-}" in
   restart)  restart_all ;;
   status)   status_all ;;
   logs)     logs_one "${2:-}" ;;
+  list)     list_miners ;;
   *)
-    echo "Usage: $0 {start|stop|restart|status|logs <pm2_name>}"
+    echo "Usage: $0 {start|stop|restart|status|logs <pm2_name>|list}"
     echo ""
-    echo "Configured miners:"
-    for entry in "${MINERS[@]}"; do
-      read -r hotkey port pm2_name <<< "$entry"
-      echo "  pm2=$pm2_name  hotkey=$hotkey  port=$port"
-    done
+    list_miners
     exit 1
     ;;
 esac
