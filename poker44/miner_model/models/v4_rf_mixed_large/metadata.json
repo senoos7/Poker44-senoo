@@ -1,0 +1,72 @@
+{
+  "version": "v4_rf_mixed_large",
+  "trained_at": "2026-03-31T21:53:38Z",
+  "data_source": "mixed",
+  "n_chunks": 4000,
+  "n_bot_chunks": 2000,
+  "n_human_chunks": 2000,
+  "chunk_size_range": [
+    60,
+    120
+  ],
+  "model_type": "Pipeline(StandardScaler + CalibratedClassifierCV(RandomForest, isotonic, cv=3))",
+  "n_features": 76,
+  "cv_ap_mean": 1.0,
+  "cv_ap_std": 0.0,
+  "cv_acc_mean": 1.0,
+  "cv_acc_std": 0.0,
+  "training_time_seconds": 2336.9,
+  "top_features": [
+    {
+      "rank": 1,
+      "name": "p25_aggression",
+      "importance": 0.1284
+    },
+    {
+      "rank": 2,
+      "name": "mean_raise_frac",
+      "importance": 0.1187
+    },
+    {
+      "rank": 3,
+      "name": "mean_aggression",
+      "importance": 0.103
+    },
+    {
+      "rank": 4,
+      "name": "std_raise_frac",
+      "importance": 0.0883
+    },
+    {
+      "rank": 5,
+      "name": "p25_raise_frac",
+      "importance": 0.0787
+    },
+    {
+      "rank": 6,
+      "name": "p25_stack_mean",
+      "importance": 0.0703
+    },
+    {
+      "rank": 7,
+      "name": "p25_amount_mean",
+      "importance": 0.0557
+    },
+    {
+      "rank": 8,
+      "name": "p75_stack_mean",
+      "importance": 0.053
+    },
+    {
+      "rank": 9,
+      "name": "p25_bet_cv",
+      "importance": 0.0483
+    },
+    {
+      "rank": 10,
+      "name": "mean_stack_mean",
+      "importance": 0.0443
+    }
+  ],
+  "description": "Uses build_mixed_labeled_chunks() \u2014 the same generator the validator uses. Bot chunks passed the anti-shortcut filter (no single feature achieves >70% accuracy). Model must learn subtle, high-order signals."
+}
