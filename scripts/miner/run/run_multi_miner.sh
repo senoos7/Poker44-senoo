@@ -38,7 +38,7 @@ PYTHON="${PYTHON:-$(which python3)}"
 
 # Default model version — used when a miner entry has no 4th field.
 # Set to "" to use the legacy model.pkl default (MODEL_VERSION unset).
-DEFAULT_MODEL_VERSION="${DEFAULT_MODEL_VERSION:-v3_gb_mixed}"
+DEFAULT_MODEL_VERSION="${DEFAULT_MODEL_VERSION:-v4_rf_mixed}"
 
 # Allowlisted validator hotkeys (space-separated).
 _DEFAULT_VALIDATOR_HOTKEYS=(
@@ -60,13 +60,13 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # MODEL_VERSION is optional — omit or use "-" to use DEFAULT_MODEL_VERSION
 # ----------------------------------------------------------------
 MINERS=(
-  # All miners use v3_gb_mixed (76-feature HistGBM — required after feature expansion)
-  "poker-miner-26002 8092 poker44_miner_2  v3_gb_mixed"
-  "poker-miner-26003 8093 poker44_miner_3  v3_gb_mixed"
-  "poker-miner-26004 8094 poker44_miner_4  v3_gb_mixed"
-  "poker-miner-26005 8095 poker44_miner_5  v3_gb_mixed"
-  "poker-miner-26006 8096 poker44_miner_6  v3_gb_mixed"
-  "poker-miner-26007 8097 poker44_miner_7  v3_gb_mixed"
+  # All miners use v4_rf_mixed (76-feature RandomForest — single-threaded, low CPU footprint)
+  "poker-miner-26002 8092 poker44_miner_2  v4_rf_mixed"
+  "poker-miner-26003 8093 poker44_miner_3  v4_rf_mixed"
+  "poker-miner-26004 8094 poker44_miner_4  v4_rf_mixed"
+  "poker-miner-26005 8095 poker44_miner_5  v4_rf_mixed"
+  "poker-miner-26006 8096 poker44_miner_6  v4_rf_mixed"
+  "poker-miner-26007 8097 poker44_miner_7  v4_rf_mixed"
 )
 
 # ----------------------------------------------------------------

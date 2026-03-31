@@ -38,7 +38,7 @@ PYTHON="${PYTHON:-$(which python3)}"
 
 # Default model version — used when a miner entry has no 4th field.
 # Set to "" to use the legacy model.pkl default (MODEL_VERSION unset).
-DEFAULT_MODEL_VERSION="${DEFAULT_MODEL_VERSION:-v3_gb_mixed}"
+DEFAULT_MODEL_VERSION="${DEFAULT_MODEL_VERSION:-v4_rf_mixed}"
 
 # Allowlisted validator hotkeys (space-separated).
 _DEFAULT_VALIDATOR_HOTKEYS=(
@@ -60,24 +60,24 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # MODEL_VERSION is optional — omit or leave blank to use DEFAULT_MODEL_VERSION
 # ----------------------------------------------------------------
 MINERS=(
-  # All miners use v3_gb_mixed (76-feature HistGBM — required after feature expansion)
-  # "poker-miner-26001 8091 poker44_miner_1  v3_gb_mixed"
-  "poker-miner-26008 8098 poker44_miner_8  v3_gb_mixed"
-  "poker-miner-26009 8099 poker44_miner_9  v3_gb_mixed"
-  "poker-miner-26010 8100 poker44_miner_10 v3_gb_mixed"
-  "poker-miner-26011 8101 poker44_miner_11 v3_gb_mixed"
-  "poker-miner-26012 8102 poker44_miner_12 v3_gb_mixed"
-  "poker-miner-26013 8103 poker44_miner_13 v3_gb_mixed"
-  "poker-miner-26014 8104 poker44_miner_14 v3_gb_mixed"
-  "poker-miner-26015 8105 poker44_miner_15 v3_gb_mixed"
-  "poker-miner-26016 8106 poker44_miner_16 v3_gb_mixed"
-  "poker-miner-26017 8107 poker44_miner_17 v3_gb_mixed"
-  "poker-miner-26018 8108 poker44_miner_18 v3_gb_mixed"
-  "poker-miner-26019 8109 poker44_miner_19 v3_gb_mixed"
-  "poker-miner-26020 8110 poker44_miner_20 v3_gb_mixed"
-  # "poker-miner-26021 8111 poker44_miner_21 v3_gb_mixed"
-  "poker-miner-26022 8112 poker44_miner_22 v3_gb_mixed"
-  "poker-miner-26023 8113 poker44_miner_23 v3_gb_mixed"
+  # All miners use v4_rf_mixed (76-feature RandomForest — single-threaded, low CPU footprint)
+  # "poker-miner-26001 8091 poker44_miner_1  v4_rf_mixed"
+  "poker-miner-26008 8098 poker44_miner_8  v4_rf_mixed"
+  "poker-miner-26009 8099 poker44_miner_9  v4_rf_mixed"
+  "poker-miner-26010 8100 poker44_miner_10 v4_rf_mixed"
+  "poker-miner-26011 8101 poker44_miner_11 v4_rf_mixed"
+  "poker-miner-26012 8102 poker44_miner_12 v4_rf_mixed"
+  "poker-miner-26013 8103 poker44_miner_13 v4_rf_mixed"
+  "poker-miner-26014 8104 poker44_miner_14 v4_rf_mixed"
+  "poker-miner-26015 8105 poker44_miner_15 v4_rf_mixed"
+  "poker-miner-26016 8106 poker44_miner_16 v4_rf_mixed"
+  "poker-miner-26017 8107 poker44_miner_17 v4_rf_mixed"
+  "poker-miner-26018 8108 poker44_miner_18 v4_rf_mixed"
+  "poker-miner-26019 8109 poker44_miner_19 v4_rf_mixed"
+  "poker-miner-26020 8110 poker44_miner_20 v4_rf_mixed"
+  # "poker-miner-26021 8111 poker44_miner_21 v4_rf_mixed"
+  "poker-miner-26022 8112 poker44_miner_22 v4_rf_mixed"
+  "poker-miner-26023 8113 poker44_miner_23 v4_rf_mixed"
 )
 
 # ----------------------------------------------------------------
