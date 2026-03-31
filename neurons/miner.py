@@ -2,12 +2,14 @@
 
 import json
 import time
+from pathlib import Path
 from typing import Tuple
 
 import bittensor as bt
 
 from poker44.base.miner import BaseMinerNeuron
 from poker44.miner_model.detector import BotDetector
+from poker44.utils.model_manifest import build_local_model_manifest
 from poker44.validator.synapse import DetectionSynapse
 
 
@@ -35,6 +37,29 @@ class Miner(BaseMinerNeuron):
                 "BotDetector: no model found — using heuristic fallback. "
                 "Run `python -m poker44.miner_model.train --version <version>` to train a model."
             )
+        repo_root = Path(__file__).resolve().parents[1]
+        self.model_manifest = build_local_model_manifest(
+            repo_root=repo_root,
+            implementation_files=[Path(__file__).resolve()],
+            defaults={
+                "model_name": "poker44-reference-heuristic",
+                "model_version": "1",
+                "framework": "python-heuristic",
+                "license": "MIT",
+                "repo_url": "https://github.com/Poker44/Poker44-subnet",
+                "notes": "Reference heuristic miner shipped with the Poker44 subnet.",
+                "open_source": True,
+                "inference_mode": "remote",
+                "training_data_statement": (
+                    "Reference heuristic miner. No training step. Uses only runtime chunk features."
+                ),
+                "training_data_sources": ["none"],
+                "private_data_attestation": (
+                    "This reference miner does not train on validator-private human data."
+                ),
+            },
+        )
+        bt.logging.info(f"Published model manifest: {self.model_manifest}")
         bt.logging.info(f"Axon created: {self.axon}")
 
     async def forward(self, synapse: DetectionSynapse) -> DetectionSynapse:
@@ -70,6 +95,7 @@ class Miner(BaseMinerNeuron):
         synapse.risk_scores = scores
         predictions = [self._detector.predict_chunk(chunk) for chunk in chunks]
         synapse.predictions = predictions
+        synapse.model_manifest = dict(self.model_manifest)
 
         n_bot = sum(predictions)
         n_human = len(predictions) - n_bot
