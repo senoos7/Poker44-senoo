@@ -91,11 +91,22 @@ class Miner(BaseMinerNeuron):
                 f"[QUERY SAMPLE HAND] data={json.dumps(sample_hand, default=str)}"
             )
 
-        scores = [self._detector.score_chunk(chunk) for chunk in chunks]
-        synapse.risk_scores = scores
-        predictions = [self._detector.predict_chunk(chunk) for chunk in chunks]
-        synapse.predictions = predictions
-        synapse.model_manifest = dict(self.model_manifest)
+        try:
+            scores = [self._detector.score_chunk(chunk) for chunk in chunks]
+            synapse.risk_scores = scores
+            predictions = [self._detector.predict_chunk(chunk) for chunk in chunks]
+            synapse.predictions = predictions
+            synapse.model_manifest = dict(self.model_manifest)
+        except Exception as exc:
+            import traceback
+            bt.logging.error(
+                f"[FORWARD ERROR] scoring failed for {len(chunks)} chunks: {exc}\n"
+                f"{traceback.format_exc()}"
+            )
+            # Return zero scores so the validator records a response rather than a timeout.
+            synapse.risk_scores = [0.0] * len(chunks)
+            synapse.predictions = [False] * len(chunks)
+            return synapse
 
         n_bot = sum(predictions)
         n_human = len(predictions) - n_bot
