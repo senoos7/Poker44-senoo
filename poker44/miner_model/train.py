@@ -13,36 +13,39 @@ only when you explicitly pass --update-default.
 ──────────────────────────────────────────────────────────────────────
 Version roadmap
 ──────────────────────────────────────────────────────────────────────
-  v1_rf_synthetic  — baseline (already archived)
+  v1_rf_synthetic  — baseline (archived; trained on 60 features)
     data: custom synthetic bots, no anti-shortcut filter
     model: RandomForest + CalibratedCV
 
-  v2_rf_mixed      — Phase 1: fix training data source
+  v2_rf_mixed      — Phase 1: fix training data source (archived; trained on 60 features)
     data: build_mixed_labeled_chunks() (same as validator, anti-shortcut filtered)
     model: RandomForest + CalibratedCV (same architecture, only data changes)
 
-  v3_gb_mixed      — Phase 2 (future): better model
+  v3_gb_mixed      — Phase 2: better model + richer features (RECOMMENDED)
     data: build_mixed_labeled_chunks()
-    model: HistGradientBoostingClassifier + more interaction features
+    model: HistGradientBoostingClassifier + 76-feature extraction
+    why: HGBM handles feature interactions natively, reduces variance,
+         produces better-calibrated probabilities, and is more stable across
+         diverse validator batches than RF. Addresses score instability.
 
 ──────────────────────────────────────────────────────────────────────
 Usage
 ──────────────────────────────────────────────────────────────────────
-  # Phase 1 — train v2 with anti-shortcut data (recommended next step)
+  # Phase 2 — train v3 HistGBM (recommended, most stable)
   cd /path/to/Poker44-subnet
-  python -m poker44.miner_model.train --version v2_rf_mixed --data-source mixed
+  python -m poker44.miner_model.train --version v3_gb_mixed --data-source mixed
 
   # Quick test run (fewer chunks, faster)
-  python -m poker44.miner_model.train --version v2_rf_mixed --data-source mixed --fast
+  python -m poker44.miner_model.train --version v3_gb_mixed --data-source mixed --fast
 
-  # Still train the legacy synthetic model (for A/B control)
-  python -m poker44.miner_model.train --version v1_rf_synthetic
+  # Large run for best quality
+  python -m poker44.miner_model.train --version v3_gb_mixed --data-source mixed --n-chunks 4000
 
   # After evaluating, promote a version to the default slot
-  python -m poker44.miner_model.train --version v2_rf_mixed --data-source mixed --update-default
+  python -m poker44.miner_model.train --version v3_gb_mixed --data-source mixed --update-default
 
-  # Large run
-  python -m poker44.miner_model.train --version v2_rf_mixed --data-source mixed --n-chunks 3000
+  # Legacy: Phase 1 RF model (60 features — needs MODEL_VERSION=v2_rf_mixed, will mismatch with new features)
+  python -m poker44.miner_model.train --version v2_rf_mixed --data-source mixed
 """
 
 from __future__ import annotations
@@ -75,7 +78,7 @@ _MODEL_DIR        = Path(__file__).parent
 _MODELS_ROOT      = _MODEL_DIR / "models"
 _DEFAULT_CORPUS   = REPO_ROOT / "hands_generator" / "human_hands" / "poker_hands_combined.json.gz"
 _DEFAULT_OUTPUT   = _MODEL_DIR / "model.pkl"   # legacy default slot
-_DEFAULT_N_CHUNKS = 2000    # total labeled chunks (half bot, half human)
+_DEFAULT_N_CHUNKS = 4000    # total labeled chunks (half bot, half human); 4000 for v3 stability
 _FAST_N_CHUNKS    = 800
 _CHUNK_SIZE_MIN   = 60
 _CHUNK_SIZE_MAX   = 120
@@ -285,7 +288,18 @@ def build_training_matrix(
 # Model training
 # ------------------------------------------------------------------
 
-def train_model(X: np.ndarray, y: np.ndarray) -> Any:
+def train_model(X: np.ndarray, y: np.ndarray, version: str = "") -> Any:
+    """Dispatch to the appropriate model architecture based on version name."""
+    if version.startswith("v3") or "gb" in version:
+        return _train_model_v3_hgbm(X, y)
+    return _train_model_v2_rf(X, y)
+
+
+def _train_model_v2_rf(X: np.ndarray, y: np.ndarray):
+    """
+    RandomForest + CalibratedClassifierCV pipeline (v1/v2 architecture).
+    Kept for backward compatibility and A/B comparison.
+    """
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.calibration import CalibratedClassifierCV
     from sklearn.model_selection import StratifiedKFold, cross_val_score
@@ -293,7 +307,7 @@ def train_model(X: np.ndarray, y: np.ndarray) -> Any:
     from sklearn.preprocessing import StandardScaler
 
     n_samples, n_features = X.shape
-    print(f"\n  Training on {n_samples} chunks × {n_features} features")
+    print(f"\n  [RF] Training on {n_samples} chunks × {n_features} features")
     print(f"  Class balance: {y.sum()} bot / {(1-y).sum()} human")
 
     base = RandomForestClassifier(
@@ -320,7 +334,7 @@ def train_model(X: np.ndarray, y: np.ndarray) -> Any:
     print("\n  Fitting final model on full dataset...")
     model.fit(X, y)
 
-    # Feature importance
+    # Feature importance from the first calibrated estimator
     rf = model.named_steps["clf"].calibrated_classifiers_[0].estimator
     importances = rf.feature_importances_
     top_idx = np.argsort(importances)[::-1][:10]
@@ -331,14 +345,97 @@ def train_model(X: np.ndarray, y: np.ndarray) -> Any:
         print(f"    {rank:>2}. {name:<35} {importances[idx]:.4f}")
         top_features.append({"rank": rank, "name": name, "importance": round(float(importances[idx]), 4)})
 
-    # Set n_jobs=1 on inner RFs before pickling to avoid joblib conflicts in async miner
+    # Set n_jobs=1 before pickling to avoid joblib conflicts in async miner
     clf = model.named_steps["clf"]
     for cal_clf in clf.calibrated_classifiers_:
         if hasattr(cal_clf, "estimator"):
             cal_clf.estimator.n_jobs = 1
         if hasattr(cal_clf, "base_estimator"):
             cal_clf.base_estimator.n_jobs = 1
-    print("\n  Set n_jobs=1 on all inner RandomForests (safe for async inference).")
+    print("\n  Set n_jobs=1 on inner RandomForests (safe for async inference).")
+
+    return model, cv_ap, cv_acc, top_features
+
+
+def _train_model_v3_hgbm(X: np.ndarray, y: np.ndarray):
+    """
+    HistGradientBoostingClassifier + CalibratedClassifierCV pipeline (v3 architecture).
+
+    Why HGBM over RandomForest:
+    - Handles feature interactions natively via gradient boosting trees
+    - Lower variance across diverse validator batches (key for stability)
+    - Better probability calibration for borderline chunks near 0.5
+    - Native regularization (l2, min_samples_leaf) avoids overfitting to training bots
+    - Faster training at larger data sizes
+
+    The combination of HGBM + isotonic calibration produces scores that are
+    more confidently separated from the 0.5 decision boundary, reducing FPR spikes.
+    """
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    from sklearn.calibration import CalibratedClassifierCV
+    from sklearn.model_selection import StratifiedKFold, cross_val_score
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    n_samples, n_features = X.shape
+    print(f"\n  [HGBM v3] Training on {n_samples} chunks × {n_features} features")
+    print(f"  Class balance: {y.sum()} bot / {(1-y).sum()} human")
+
+    # HGBM is scale-invariant (tree-based), but StandardScaler doesn't hurt
+    # and keeps the pipeline contract consistent with v1/v2 for scoring.
+    base = HistGradientBoostingClassifier(
+        max_iter=400,
+        max_depth=6,            # shallower than RF → less overfitting
+        min_samples_leaf=12,    # regularization: avoid fitting single-sample leaves
+        learning_rate=0.04,     # slow, careful boosting
+        l2_regularization=0.3,  # additional regularization
+        max_bins=127,           # default; captures fine-grained feature splits
+        class_weight="balanced",
+        random_state=42,
+        early_stopping=False,   # no validation split needed; CalibratedCV handles it
+    )
+    model = Pipeline([
+        ("scaler", StandardScaler()),
+        ("clf", CalibratedClassifierCV(base, cv=3, method="isotonic")),
+    ])
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    print("\n  Running 5-fold cross-validation (average_precision)...")
+    cv_ap  = cross_val_score(model, X, y, cv=cv, scoring="average_precision", n_jobs=1)
+    cv_acc = cross_val_score(model, X, y, cv=cv, scoring="accuracy",           n_jobs=1)
+    print(f"  CV AP:     {cv_ap.mean():.4f} ± {cv_ap.std():.4f}  (target >0.85)")
+    print(f"  CV Acc:    {cv_acc.mean():.4f} ± {cv_acc.std():.4f}")
+
+    # Calibration quality: report mean predicted probability for each class
+    # (well-calibrated: bot scores high, human scores low, few near 0.5)
+    from sklearn.model_selection import cross_val_predict
+    cv_probs = cross_val_predict(model, X, y, cv=cv, method="predict_proba")[:, 1]
+    bot_scores   = cv_probs[y == 1]
+    human_scores = cv_probs[y == 0]
+    print(f"\n  Calibration check (lower ambiguity = better FPR stability):")
+    print(f"    Bot chunks:   mean={bot_scores.mean():.3f}  std={bot_scores.std():.3f}"
+          f"  pct_above_0.5={100*np.mean(bot_scores > 0.5):.1f}%")
+    print(f"    Human chunks: mean={human_scores.mean():.3f}  std={human_scores.std():.3f}"
+          f"  pct_below_0.5={100*np.mean(human_scores < 0.5):.1f}%")
+    ambiguous = np.mean((cv_probs > 0.44) & (cv_probs < 0.56))
+    print(f"    Ambiguous (0.44–0.56): {100*ambiguous:.1f}%  (target <10%)")
+
+    print("\n  Fitting final model on full dataset...")
+    model.fit(X, y)
+
+    # Feature importance from HGBM (requires accessing internals of CalibratedCV)
+    top_features = []
+    try:
+        hgbm = model.named_steps["clf"].calibrated_classifiers_[0].estimator
+        importances = hgbm.feature_importances_
+        top_idx = np.argsort(importances)[::-1][:10]
+        print("\n  Top 10 features by importance:")
+        for rank, idx in enumerate(top_idx, 1):
+            name = CHUNK_FEATURE_NAMES[idx] if idx < len(CHUNK_FEATURE_NAMES) else f"feat_{idx}"
+            print(f"    {rank:>2}. {name:<35} {importances[idx]:.4f}")
+            top_features.append({"rank": rank, "name": name, "importance": round(float(importances[idx]), 4)})
+    except Exception as exc:
+        print(f"  (Feature importance unavailable: {exc})")
 
     return model, cv_ap, cv_acc, top_features
 
@@ -366,7 +463,11 @@ def _save_metadata(
         "n_bot_chunks": n_per_class,
         "n_human_chunks": n_per_class,
         "chunk_size_range": [_CHUNK_SIZE_MIN, _CHUNK_SIZE_MAX],
-        "model_type": "Pipeline(StandardScaler + CalibratedClassifierCV(RandomForest, isotonic, cv=3))",
+        "model_type": (
+            "Pipeline(StandardScaler + CalibratedClassifierCV(HistGradientBoosting, isotonic, cv=3))"
+            if (version.startswith("v3") or "gb" in version) else
+            "Pipeline(StandardScaler + CalibratedClassifierCV(RandomForest, isotonic, cv=3))"
+        ),
         "n_features": n_features,
         "cv_ap_mean": round(float(cv_ap.mean()), 4),
         "cv_ap_std":  round(float(cv_ap.std()),  4),
@@ -465,9 +566,10 @@ def main(
     print(f"  Sanitized {len(bot_chunks)} bot + {len(human_chunks)} human chunks")
 
     # ---- Step 3: features + train ----
-    print("\n[TRAIN] Building feature matrix + training RandomForest...")
+    arch = "HistGBM" if (version.startswith("v3") or "gb" in version) else "RandomForest"
+    print(f"\n[TRAIN] Building feature matrix + training {arch}...")
     X, y = build_training_matrix(bot_chunks, human_chunks)
-    model, cv_ap, cv_acc, top_features = train_model(X, y)
+    model, cv_ap, cv_acc, top_features = train_model(X, y, version=version)
 
     # ---- Step 4: save model ----
     with open(output_path, "wb") as f:
@@ -502,6 +604,7 @@ def main(
     print("Next steps:")
     print(f"  # A/B test: set MODEL_VERSION={version} on miners you want to upgrade")
     print(f"  # VPS: export MODEL_VERSION={version} && pm2 restart <miner_name>")
+    print(f"  # Promote: python -m poker44.miner_model.train --version {version} --update-default")
     print(f"  # Push: git add poker44/miner_model/models/{version}/ && git commit && git push")
     print("=" * 60)
 
@@ -513,8 +616,8 @@ def _parse_args() -> argparse.Namespace:
         epilog=__doc__,
     )
     p.add_argument(
-        "--version", type=str, default="v2_rf_mixed",
-        help="Model version name, saved to models/<version>/  (default: v2_rf_mixed)",
+        "--version", type=str, default="v3_gb_mixed",
+        help="Model version name, saved to models/<version>/  (default: v3_gb_mixed)",
     )
     p.add_argument(
         "--data-source", choices=["synthetic", "mixed"], default="mixed",

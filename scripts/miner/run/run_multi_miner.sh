@@ -46,10 +46,10 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # Each row: "HOTKEY AXON_PORT PM2_NAME"
 # ----------------------------------------------------------------
 MINERS=(
-  "poker-miner-26001 8091 poker44_miner_1"
-  "poker-miner-26002 8092 poker44_miner_2"
-  "poker-miner-26003 8093 poker44_miner_3"
-  "poker-miner-26004 8094 poker44_miner_4" 
+  "poker-miner-26001 8091 poker44_miner_1 v3_gb_mixed"
+  "poker-miner-26002 8092 poker44_miner_2 v3_gb_mixed"
+  "poker-miner-26003 8093 poker44_miner_3 v3_gb_mixed"
+  "poker-miner-26004 8094 poker44_miner_4 v3_gb_mixed" 
   # "poker-miner-26011 8101 poker44_miner_11"
   # "poker-miner-26012 8102 poker44_miner_12"
   # "poker-miner-26013 8103 poker44_miner_13"
@@ -57,9 +57,9 @@ MINERS=(
   # "poker-miner-26016 8106 poker44_miner_16"
   # "poker-miner-26017 8107 poker44_miner_17"
   # "poker-miner-26018 8108 poker44_miner_18"
-  "poker-miner-26019 8109 poker44_miner_19"
+  "poker-miner-26019 8109 poker44_miner_19 v3_gb_mixed"
   # "poker-miner-26020 8110 poker44_miner_20"
-  "poker-miner-26021 8111 poker44_miner_21"
+  "poker-miner-26021 8111 poker44_miner_21 v3_gb_mixed"
 )
 
 # ----------------------------------------------------------------

@@ -10,19 +10,25 @@ Works on the REAL sanitized hand format from poker44/validator/sanitization.py:
   - streets: [] (community cards stripped)
   - metadata: normalized to constants (sb=0.01, bb=0.02)
 
-Per-hand feature vector (15 features):
+Per-hand feature vector (19 features):
   preflop_frac, flop_frac, turn_frac, river_frac,   [street distribution]
   depth,                                             [postflop depth 0-1]
-  fold_frac, call_frac, raise_frac,                  [action type fracs]
+  fold_frac, call_frac, raise_frac, check_frac,      [action type fracs]
   amount_mean, amount_std,                           [bet sizing in BB]
   pot_after_last,                                    [final pot in BB]
-  n_players, stack_mean, stack_cv                    [player/stack info]
+  n_players, stack_mean, stack_cv,                   [player/stack info]
+  aggression,                                        [raise / (call+check)]
+  bet_cv,                                            [std/mean of bet sizes]
+  went_to_river,                                     [1.0 if river seen]
+  street_entropy,                                    [entropy of street dist]
 
-Chunk-level feature vector (60 features):
+Chunk-level feature vector (76 features):
   mean, std, p25, p75 of the per-hand vector across all hands in the chunk.
 
 Key discriminator: bots play with LOW within-chunk variance (systematic profiles)
 while human chunks are diverse — high variance in bet sizes, street depth, etc.
+Bots also show lower street_entropy (more uniform street patterns) and lower
+bet_cv (more mechanical bet sizing) than humans.
 """
 
 from __future__ import annotations
@@ -34,12 +40,14 @@ import numpy as np
 
 _MINER_ACTION_WINDOW = 12
 _POST_FLOP_STREETS = {"flop", "turn", "river"}
-_N_HAND_FEATURES = 15
+_N_HAND_FEATURES = 19
 
 _RAISE_TYPES = {"raise", "bet", "all_in"}
 _CALL_TYPES  = {"call"}
 _CHECK_TYPES = {"check"}
 _FOLD_TYPES  = {"fold"}
+
+_LOG4 = float(np.log(4.0))   # max possible street entropy denominator
 
 
 def _safe_float(v: Any, default: float = 0.0) -> float:
@@ -54,7 +62,7 @@ def _safe_str(v: Any) -> str:
 
 
 def extract_hand_features(hand: Dict[str, Any]) -> np.ndarray:
-    """Return a (15,) float32 feature vector for one sanitized hand."""
+    """Return a (19,) float32 feature vector for one sanitized hand."""
     actions = hand.get("actions") or []
     players = hand.get("players") or []
 
@@ -75,6 +83,7 @@ def extract_hand_features(hand: Dict[str, Any]) -> np.ndarray:
     fold_frac  = sum(type_counts.get(t, 0) for t in _FOLD_TYPES)  / total_slots
     call_frac  = sum(type_counts.get(t, 0) for t in _CALL_TYPES)  / total_slots
     raise_frac = sum(type_counts.get(t, 0) for t in _RAISE_TYPES) / total_slots
+    check_frac = sum(type_counts.get(t, 0) for t in _CHECK_TYPES) / total_slots
 
     # --- Bet sizing: normalized_amount_bb across active (non-zero) actions ---
     amounts = [
@@ -101,16 +110,36 @@ def extract_hand_features(hand: Dict[str, Any]) -> np.ndarray:
     stack_std  = float(np.std(stacks)) if len(stacks) > 1 else 0.0
     stack_cv   = stack_std / max(float(np.mean(stacks)), 1e-6) if stacks else 0.0
 
+    # --- Aggression ratio (raises per call+check, capped at 5) ---
+    aggression = min(
+        raise_frac / max(call_frac + check_frac, 1e-6),
+        5.0,
+    )
+
+    # --- Bet coefficient of variation (bots have mechanical, low-CV sizing) ---
+    bet_cv = min(amount_std / max(amount_mean, 1e-6), 5.0)
+
+    # --- River flag ---
+    went_to_river = 1.0 if street_counts.get("river", 0) > 0 else 0.0
+
+    # --- Street entropy (bots concentrate on fewer streets → lower entropy) ---
+    # Normalized to [0, 1] by dividing by log(4) — the maximum for 4 streets.
+    fracs = [preflop_frac, flop_frac, turn_frac, river_frac]
+    raw_entropy = -sum(f * float(np.log(f + 1e-9)) for f in fracs)
+    street_entropy = float(np.clip(raw_entropy / _LOG4, 0.0, 1.0))
+
     return np.array(
         [
             preflop_frac, flop_frac, turn_frac, river_frac,
             depth,
-            fold_frac, call_frac, raise_frac,
+            fold_frac, call_frac, raise_frac, check_frac,
             amount_mean, amount_std,
             pot_after_last,
             n_players, stack_mean, stack_cv,
-            # 15th feature: aggression ratio (raises per call+check, capped at 5)
-            min(raise_frac / max(call_frac + (type_counts.get("check", 0) / total_slots), 1e-6), 5.0),
+            aggression,
+            bet_cv,
+            went_to_river,
+            street_entropy,
         ],
         dtype=np.float32,
     )
@@ -118,7 +147,7 @@ def extract_hand_features(hand: Dict[str, Any]) -> np.ndarray:
 
 def extract_chunk_features(chunk: List[Dict[str, Any]]) -> np.ndarray:
     """
-    Return a (60,) float32 feature vector for one chunk of sanitized hands.
+    Return a (76,) float32 feature vector for one chunk of sanitized hands.
 
     Aggregates per-hand features with mean, std, p25, p75.
     The std components are the strongest bot-vs-human discriminators:
@@ -127,7 +156,7 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> np.ndarray:
     if not chunk:
         return np.zeros(4 * _N_HAND_FEATURES, dtype=np.float32)
 
-    hand_mat = np.vstack([extract_hand_features(h) for h in chunk])  # (N, 15)
+    hand_mat = np.vstack([extract_hand_features(h) for h in chunk])  # (N, 19)
 
     means = hand_mat.mean(axis=0)
     stds  = hand_mat.std(axis=0)
@@ -140,11 +169,14 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> np.ndarray:
 _FEAT_NAMES = [
     "preflop_frac", "flop_frac", "turn_frac", "river_frac",
     "depth",
-    "fold_frac", "call_frac", "raise_frac",
+    "fold_frac", "call_frac", "raise_frac", "check_frac",
     "amount_mean", "amount_std",
     "pot_after_last",
     "n_players", "stack_mean", "stack_cv",
     "aggression",
+    "bet_cv",
+    "went_to_river",
+    "street_entropy",
 ]
 
 CHUNK_FEATURE_NAMES: List[str] = [
