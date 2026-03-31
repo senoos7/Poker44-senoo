@@ -61,6 +61,10 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # ----------------------------------------------------------------
 MINERS=(
   # ── Control group (v1_rf_synthetic baseline) ──────────────────
+  # "poker-miner-26001 8091 poker44_miner_1  v1_rf_synthetic"
+  "poker-miner-26002 8092 poker44_miner_2  v1_rf_synthetic"
+  "poker-miner-26003 8093 poker44_miner_3  v1_rf_synthetic"
+  "poker-miner-26004 8094 poker44_miner_4  v1_rf_synthetic"
   "poker-miner-26005 8095 poker44_miner_5  v1_rf_synthetic"
   "poker-miner-26006 8096 poker44_miner_6  v1_rf_synthetic"
   "poker-miner-26007 8097 poker44_miner_7  v1_rf_synthetic"
@@ -77,7 +81,9 @@ MINERS=(
   "poker-miner-26016 8106 poker44_miner_16 v1_rf_synthetic"
   "poker-miner-26017 8107 poker44_miner_17 v1_rf_synthetic"
   "poker-miner-26018 8108 poker44_miner_18 v1_rf_synthetic"
+  "poker-miner-26019 8109 poker44_miner_19 v1_rf_synthetic"
   "poker-miner-26020 8110 poker44_miner_20 v1_rf_synthetic"
+  "poker-miner-26021 8111 poker44_miner_21 v3_gb_mixed"
   "poker-miner-26022 8112 poker44_miner_22 v1_rf_synthetic"
   "poker-miner-26023 8113 poker44_miner_23 v1_rf_synthetic"
 )
