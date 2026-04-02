@@ -78,6 +78,8 @@ MINERS=(
   "poker-miner-26021 8111 poker44_miner_21 v4_rf_mixed_large"
   "poker-miner-26022 8112 poker44_miner_22 v4_rf_mixed_large"
   "poker-miner-26023 8113 poker44_miner_23 v4_rf_mixed_large"
+  "poker-miner-26025 8115 poker44_miner_25 v4_rf_mixed_large"
+  "poker-miner-26026 8116 poker44_miner_26 v4_rf_mixed_large"
 )
 
 # ----------------------------------------------------------------
