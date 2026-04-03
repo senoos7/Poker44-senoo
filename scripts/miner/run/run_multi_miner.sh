@@ -124,8 +124,13 @@ start_all() {
 
     # Pass MODEL_VERSION into the PM2 process environment so it persists
     # through restarts (PM2 snapshots the env at process creation time).
+    # POKER44_MODEL_REPO_COMMIT lets the manifest carry the real git SHA so
+    # the validator sees transparent (not opaque) compliance.
     # shellcheck disable=SC2046
     MODEL_VERSION="$_MODEL_VER" \
+    POKER44_MODEL_VERSION="$_MODEL_VER" \
+    POKER44_MODEL_NAME="poker44-rf-bot-detector" \
+    POKER44_MODEL_REPO_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo '')" \
     pm2 start "$MINER_SCRIPT" \
       --name "$_PM2_NAME" \
       --interpreter "$PYTHON" \
@@ -157,6 +162,9 @@ restart_all() {
     echo "Restarting: $_PM2_NAME  (model=$_MODEL_VER)"
     # --update-env refreshes MODEL_VERSION in pm2's stored process env
     MODEL_VERSION="$_MODEL_VER" \
+    POKER44_MODEL_VERSION="$_MODEL_VER" \
+    POKER44_MODEL_NAME="poker44-rf-bot-detector" \
+    POKER44_MODEL_REPO_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo '')" \
     pm2 restart "$_PM2_NAME" --update-env 2>/dev/null \
       || echo "  ($_PM2_NAME not found — run 'start' first)"
   done

@@ -129,9 +129,12 @@ start_all() {
     echo "Starting: pm2=$_PM2_NAME  hotkey=$_HOTKEY  port=$_PORT  model=$_MODEL_VER"
     pm2 delete "$_PM2_NAME" 2>/dev/null || true
 
-    # Pass MODEL_VERSION into the PM2 process environment so it persists
-    # through restarts (PM2 snapshots the env at process creation time).
+    # Pass MODEL_VERSION and manifest env vars so the process has a real
+    # repo_commit in its manifest (transparent compliance, no suspicion).
     MODEL_VERSION="$_MODEL_VER" \
+    POKER44_MODEL_VERSION="$_MODEL_VER" \
+    POKER44_MODEL_NAME="poker44-rf-bot-detector" \
+    POKER44_MODEL_REPO_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo '')" \
     pm2 start "$MINER_SCRIPT" \
       --name "$_PM2_NAME" \
       --interpreter "$PYTHON" \
@@ -161,7 +164,11 @@ restart_all() {
   for entry in "${MINERS[@]}"; do
     parse_miner_entry "$entry"
     echo "Restarting: $_PM2_NAME"
-    pm2 restart "$_PM2_NAME" 2>/dev/null || echo "  (not running — use 'start' instead)"
+    MODEL_VERSION="$_MODEL_VER" \
+    POKER44_MODEL_VERSION="$_MODEL_VER" \
+    POKER44_MODEL_NAME="poker44-rf-bot-detector" \
+    POKER44_MODEL_REPO_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo '')" \
+    pm2 restart "$_PM2_NAME" --update-env 2>/dev/null || echo "  (not running — use 'start' instead)"
   done
 }
 

@@ -1,6 +1,8 @@
 """Poker44 miner — ML-based bot detector with heuristic fallback."""
 
 import json
+import os
+import subprocess
 import time
 from pathlib import Path
 from typing import Tuple
@@ -42,24 +44,46 @@ class Miner(BaseMinerNeuron):
                 "Run `python -m poker44.miner_model.train --version <version>` to train a model."
             )
         repo_root = Path(__file__).resolve().parents[1]
+
+        # Auto-detect the current git commit so the manifest carries a real
+        # repo_commit value.  Without this the validator marks every miner
+        # as opaque and logs manifest_missing_repo_commit suspicion on every
+        # forward cycle.  The env var POKER44_MODEL_REPO_COMMIT overrides.
+        try:
+            _auto_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(repo_root),
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+        except Exception:
+            _auto_commit = ""
+
+        # Use the MODEL_VERSION env var (set by run scripts) so the manifest
+        # version field matches the actual model file being loaded.
+        _model_version = os.getenv("MODEL_VERSION", self._detector.model_label or "v4_rf_mixed")
+
         self.model_manifest = build_local_model_manifest(
             repo_root=repo_root,
             implementation_files=[Path(__file__).resolve()],
             defaults={
-                "model_name": "poker44-reference-heuristic",
-                "model_version": "1",
-                "framework": "python-heuristic",
+                "model_name": "poker44-rf-bot-detector",
+                "model_version": _model_version,
+                "framework": "scikit-learn",
                 "license": "MIT",
                 "repo_url": "https://github.com/Poker44/Poker44-subnet",
-                "notes": "Reference heuristic miner shipped with the Poker44 subnet.",
+                "repo_commit": _auto_commit,
+                "notes": "RandomForest bot-detector trained on mixed human/bot chunk data.",
                 "open_source": True,
                 "inference_mode": "remote",
                 "training_data_statement": (
-                    "Reference heuristic miner. No training step. Uses only runtime chunk features."
+                    "Trained on synthetic and mixed human/bot chunk data derived from the "
+                    "Poker44 public benchmark dataset using poker44.miner_model.train."
                 ),
-                "training_data_sources": ["none"],
+                "training_data_sources": ["poker44-public-benchmark"],
                 "private_data_attestation": (
-                    "This reference miner does not train on validator-private human data."
+                    "This miner does not train on validator-private human data. "
+                    "All training data is derived from the public Poker44 benchmark."
                 ),
             },
         )
