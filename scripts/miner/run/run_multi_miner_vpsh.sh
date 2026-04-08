@@ -2,17 +2,17 @@
 # ============================================================
 # run_multi_miner_vpsh.sh — manage multiple Poker44 miners (pm2)
 #
-# Each miner entry: "HOTKEY AXON_PORT PM2_NAME [MODEL_VERSION]"
-#   HOTKEY          — bittensor hotkey name (under the same coldkey)
-#   AXON_PORT       — unique port per miner
+# Each miner entry:  "WALLET  HOTKEY  PORT  PM2_NAME  [MODEL_VERSION]"
+#   WALLET          — coldkey wallet name; use "-" to fall back to DEFAULT_WALLET_NAME
+#   HOTKEY          — bittensor hotkey name registered under that wallet
+#   PORT            — unique axon port per miner
 #   PM2_NAME        — unique pm2 process name
-#   MODEL_VERSION   — (optional) which model to load; defaults to DEFAULT_MODEL_VERSION
-#                     Must match a folder under poker44/miner_model/models/
-#                     Leave blank to use the legacy model.pkl default
+#   MODEL_VERSION   — (optional) model subfolder; "-" → DEFAULT_MODEL_VERSION
 #
-# A/B testing example:
-#   "poker-miner-26005 8095 poker44_miner_5  v1_rf_synthetic"   ← control
-#   "poker-miner-26008 8098 poker44_miner_8  v2_rf_mixed"       ← test
+# Multi-wallet example:
+#   "wallet-A  poker-miner-001  8091  miner_1   v4_rf_mixed"
+#   "wallet-B  poker-miner-002  8092  miner_2   v4_rf_mixed"
+#   "-         poker-miner-003  8093  miner_3   -"          ← uses defaults
 #
 # Usage:
 #   ./scripts/miner/run/run_multi_miner_vpsh.sh start
@@ -20,15 +20,15 @@
 #   ./scripts/miner/run/run_multi_miner_vpsh.sh restart
 #   ./scripts/miner/run/run_multi_miner_vpsh.sh status
 #   ./scripts/miner/run/run_multi_miner_vpsh.sh logs <pm2_name>
-#   ./scripts/miner/run/run_multi_miner_vpsh.sh list    # show configured miners
+#   ./scripts/miner/run/run_multi_miner_vpsh.sh list
 # ============================================================
 
 set -e
 
 # ----------------------------------------------------------------
-# Shared settings (same for all miners)
+# Shared defaults — used when a miner entry has "-" in that field
 # ----------------------------------------------------------------
-WALLET_NAME="${WALLET_NAME:-superbit-darnsin}"
+DEFAULT_WALLET_NAME="${DEFAULT_WALLET_NAME:-superbit-darnsin}"
 NETWORK="${NETWORK:-finney}"
 NETUID="${NETUID:-126}"
 MINER_SCRIPT="./neurons/miner.py"
@@ -36,8 +36,7 @@ MINER_SCRIPT="./neurons/miner.py"
 # Python interpreter — set to venv python so PM2 uses the right env
 PYTHON="${PYTHON:-$(which python3)}"
 
-# Default model version — used when a miner entry has no 4th field.
-# Set to "" to use the legacy model.pkl default (MODEL_VERSION unset).
+# Default model version — used when a miner entry has no 5th field or "-"
 DEFAULT_MODEL_VERSION="${DEFAULT_MODEL_VERSION:-v4_rf_mixed}"
 
 # Allowlisted validator hotkeys (space-separated).
@@ -56,30 +55,30 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 
 # ----------------------------------------------------------------
 # Miner definitions
-# Format: "HOTKEY AXON_PORT PM2_NAME [MODEL_VERSION]"
-# MODEL_VERSION is optional — omit or leave blank to use DEFAULT_MODEL_VERSION
+# Format: "WALLET  HOTKEY  PORT  PM2_NAME  [MODEL_VERSION]"
+# Use "-" for WALLET or MODEL_VERSION to fall back to the defaults above.
 # ----------------------------------------------------------------
 MINERS=(
-  # All miners use v4_rf_mixed (76-feature RandomForest — single-threaded, low CPU footprint)
-  "poker-miner-26001 8091 poker44_miner_1  v4_rf_mixed_large"
-  "poker-miner-26008 8098 poker44_miner_8  v4_rf_mixed_large"
-  "poker-miner-26009 8099 poker44_miner_9  v4_rf_mixed_large"
-  "poker-miner-26010 8100 poker44_miner_10 v4_rf_mixed_large"
-  "poker-miner-26011 8101 poker44_miner_11 v4_rf_mixed_large"
-  "poker-miner-26012 8102 poker44_miner_12 v4_rf_mixed_large"
-  "poker-miner-26013 8103 poker44_miner_13 v4_rf_mixed_large"
-  "poker-miner-26014 8104 poker44_miner_14 v4_rf_mixed_large"
-  "poker-miner-26015 8105 poker44_miner_15 v4_rf_mixed_large"
-  "poker-miner-26016 8106 poker44_miner_16 v4_rf_mixed_large"
-  "poker-miner-26017 8107 poker44_miner_17 v4_rf_mixed_large"
-  "poker-miner-26018 8108 poker44_miner_18 v4_rf_mixed_large"
-  "poker-miner-26019 8109 poker44_miner_19 v4_rf_mixed_large"
-  "poker-miner-26020 8110 poker44_miner_20 v4_rf_mixed_large"
-  "poker-miner-26021 8111 poker44_miner_21 v4_rf_mixed_large"
-  "poker-miner-26022 8112 poker44_miner_22 v4_rf_mixed_large"
-  "poker-miner-26023 8113 poker44_miner_23 v4_rf_mixed_large"
-  "poker-miner-26025 8115 poker44_miner_25 v4_rf_mixed_large"
-  "poker-miner-26026 8116 poker44_miner_26 v4_rf_mixed_large"
+  # wallet-name           hotkey               port  pm2-name            model-version
+  "superbit-darnsin  poker-miner-26001  8091  poker44_miner_1   v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26008  8098  poker44_miner_8   v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26010  8100  poker44_miner_10  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26012  8102  poker44_miner_12  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26013  8103  poker44_miner_13  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26014  8104  poker44_miner_14  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26015  8105  poker44_miner_15  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26016  8106  poker44_miner_16  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26017  8107  poker44_miner_17  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26018  8108  poker44_miner_18  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26019  8109  poker44_miner_19  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26020  8110  poker44_miner_20  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26021  8111  poker44_miner_21  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26022  8112  poker44_miner_22  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26023  8113  poker44_miner_23  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26025  8115  poker44_miner_25  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26026  8116  poker44_miner_26  v4_rf_mixed_large"
+  # Example: different coldkey
+  # "my-other-wallet  poker-miner-new01  8120  poker44_miner_n1  v4_rf_mixed_large"
 )
 
 # ----------------------------------------------------------------
@@ -93,9 +92,10 @@ require_pm2() {
 }
 
 miner_args() {
-  local hotkey="$1"
-  local port="$2"
-  local args="--netuid $NETUID --wallet.name $WALLET_NAME --wallet.hotkey $hotkey \
+  local wallet="$1"
+  local hotkey="$2"
+  local port="$3"
+  local args="--netuid $NETUID --wallet.name $wallet --wallet.hotkey $hotkey \
         --subtensor.network $NETWORK --axon.port $port --logging.debug"
 
   if [ -n "$ALLOWED_VALIDATOR_HOTKEYS" ]; then
@@ -108,11 +108,19 @@ miner_args() {
   echo "$args"
 }
 
-# Parse a miner entry into its fields
+# Parse a miner entry into named variables.
+# Sets: _WALLET, _HOTKEY, _PORT, _PM2_NAME, _MODEL_VER
 parse_miner_entry() {
-  # Sets: _HOTKEY, _PORT, _PM2_NAME, _MODEL_VER
-  read -r _HOTKEY _PORT _PM2_NAME _MODEL_VER <<< "$1"
-  # If MODEL_VER is empty or "-", use the default
+  _WALLET=""
+  _HOTKEY=""
+  _PORT=""
+  _PM2_NAME=""
+  _MODEL_VER=""
+  read -r _WALLET _HOTKEY _PORT _PM2_NAME _MODEL_VER <<< "$1"
+  # "-" or empty → fall back to defaults
+  if [ -z "$_WALLET" ] || [ "$_WALLET" = "-" ]; then
+    _WALLET="$DEFAULT_WALLET_NAME"
+  fi
   if [ -z "$_MODEL_VER" ] || [ "$_MODEL_VER" = "-" ]; then
     _MODEL_VER="$DEFAULT_MODEL_VERSION"
   fi
@@ -126,11 +134,9 @@ start_all() {
   export PYTHONPATH="$(pwd)"
   for entry in "${MINERS[@]}"; do
     parse_miner_entry "$entry"
-    echo "Starting: pm2=$_PM2_NAME  hotkey=$_HOTKEY  port=$_PORT  model=$_MODEL_VER"
+    echo "Starting: pm2=$_PM2_NAME  wallet=$_WALLET  hotkey=$_HOTKEY  port=$_PORT  model=$_MODEL_VER"
     pm2 delete "$_PM2_NAME" 2>/dev/null || true
 
-    # Pass MODEL_VERSION and manifest env vars so the process has a real
-    # repo_commit in its manifest (transparent compliance, no suspicion).
     MODEL_VERSION="$_MODEL_VER" \
     POKER44_MODEL_VERSION="$_MODEL_VER" \
     POKER44_MODEL_NAME="poker44-rf-bot-detector" \
@@ -138,7 +144,7 @@ start_all() {
     pm2 start "$MINER_SCRIPT" \
       --name "$_PM2_NAME" \
       --interpreter "$PYTHON" \
-      -- $(miner_args "$_HOTKEY" "$_PORT")
+      -- $(miner_args "$_WALLET" "$_HOTKEY" "$_PORT")
   done
   pm2 save
   echo ""
@@ -163,7 +169,7 @@ restart_all() {
   require_pm2
   for entry in "${MINERS[@]}"; do
     parse_miner_entry "$entry"
-    echo "Restarting: $_PM2_NAME"
+    echo "Restarting: $_PM2_NAME  (wallet=$_WALLET  model=$_MODEL_VER)"
     MODEL_VERSION="$_MODEL_VER" \
     POKER44_MODEL_VERSION="$_MODEL_VER" \
     POKER44_MODEL_NAME="poker44-rf-bot-detector" \
@@ -184,7 +190,7 @@ logs_one() {
     echo "Available miners:"
     for entry in "${MINERS[@]}"; do
       parse_miner_entry "$entry"
-      echo "  $_PM2_NAME  (hotkey=$_HOTKEY  port=$_PORT  model=$_MODEL_VER)"
+      echo "  $_PM2_NAME  (wallet=$_WALLET  hotkey=$_HOTKEY  port=$_PORT  model=$_MODEL_VER)"
     done
     exit 1
   fi
@@ -194,14 +200,14 @@ logs_one() {
 list_miners() {
   echo "Configured miners:"
   echo ""
-  printf "  %-28s %-6s %-26s %s\n" "PM2_NAME" "PORT" "HOTKEY" "MODEL_VERSION"
-  printf "  %-28s %-6s %-26s %s\n" "--------" "----" "------" "-------------"
+  printf "  %-22s %-28s %-6s %-26s %s\n" "WALLET" "PM2_NAME" "PORT" "HOTKEY" "MODEL_VERSION"
+  printf "  %-22s %-28s %-6s %-26s %s\n" "------" "--------" "----" "------" "-------------"
   for entry in "${MINERS[@]}"; do
     parse_miner_entry "$entry"
-    printf "  %-28s %-6s %-26s %s\n" "$_PM2_NAME" "$_PORT" "$_HOTKEY" "$_MODEL_VER"
+    printf "  %-22s %-28s %-6s %-26s %s\n" "$_WALLET" "$_PM2_NAME" "$_PORT" "$_HOTKEY" "$_MODEL_VER"
   done
   echo ""
-  echo "Default MODEL_VERSION: $DEFAULT_MODEL_VERSION"
+  echo "Default wallet: $DEFAULT_WALLET_NAME   Default model: $DEFAULT_MODEL_VERSION"
 }
 
 # ----------------------------------------------------------------
