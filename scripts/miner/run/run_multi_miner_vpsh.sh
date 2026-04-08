@@ -62,6 +62,7 @@ MINERS=(
   # wallet-name           hotkey               port  pm2-name            model-version
   "superbit-darnsin  poker-miner-26001  8091  poker44_miner_1   v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26008  8098  poker44_miner_8   v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26009  8099  poker44_miner_9   v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26010  8100  poker44_miner_10  v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26012  8102  poker44_miner_12  v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26013  8103  poker44_miner_13  v4_rf_mixed_large"
