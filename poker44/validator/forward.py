@@ -26,7 +26,7 @@ from poker44.validator.integrity import (
     update_suspicion_registry,
 )
 from poker44.validator.synapse import DetectionSynapse
-from poker44.validator.sanitization import sanitize_hand_for_miner
+from poker44.validator.sanitization import prepare_hand_for_miner
 
 from poker44.validator.constants import (
     BURN_EMISSIONS,
@@ -140,6 +140,7 @@ async def _run_forward_cycle(validator) -> None:
                 dataset_stats=getattr(validator.provider, "stats", {}),
                 extra={"forward/status": "no_eligible_miners"},
             )
+        _finalize_provider_cycle(validator)
         await asyncio.sleep(validator.poll_interval)
         return
     
@@ -166,7 +167,7 @@ async def _run_forward_cycle(validator) -> None:
                     else:
                         hand_payload = hand.__dict__
 
-            chunk_dicts.append(sanitize_hand_for_miner(hand_payload))
+            chunk_dicts.append(prepare_hand_for_miner(hand_payload))
         
         chunks.append(chunk_dicts)
         
@@ -288,6 +289,7 @@ async def _run_forward_cycle(validator) -> None:
                     "forward/bot_chunk_count": sum(1 for label in batch_labels if label == 1),
                 },
             )
+        _finalize_provider_cycle(validator)
         await asyncio.sleep(validator.poll_interval)
         return
     
@@ -336,10 +338,21 @@ async def _run_forward_cycle(validator) -> None:
             winner_rewards=[float(weight) for weight in winner_rewards],
         )
     bt.logging.info(f"Rewards issued for {len(winner_rewards)} UID(s).")
+    _finalize_provider_cycle(validator)
     bt.logging.info(
         f"[Forward #{validator.forward_count}] complete. Sleeping {validator.poll_interval}s before next tick.",
     )
     await asyncio.sleep(validator.poll_interval)
+
+
+def _finalize_provider_cycle(validator) -> None:
+    mark_evaluated = getattr(validator.provider, "mark_last_batch_evaluated", None)
+    if not callable(mark_evaluated):
+        return
+    try:
+        mark_evaluated()
+    except Exception as exc:
+        bt.logging.warning(f"Provider runtime finalization failed: {exc}")
 
 
 def _record_model_manifest(
@@ -699,27 +712,25 @@ def _select_weight_targets(reward_map: Dict[int, float]) -> tuple[List[int], np.
             )
             return [UID_ZERO], np.asarray([1.0], dtype=np.float32)
 
-        total_positive = float(sum(reward for _, reward in positive))
-        if total_positive <= 0.0:
-            bt.logging.info(
-                "Positive-reward sum is zero; assigning 100%% to UID 0."
-            )
-            return [UID_ZERO], np.asarray([1.0], dtype=np.float32)
-
-        norm = [(uid, reward / total_positive) for uid, reward in positive]
+        podium = positive[:3]
+        podium_splits = [0.5, 0.3, 0.2][: len(podium)]
 
         if BURN_EMISSIONS:
-            uids = [UID_ZERO] + [uid for uid, _ in norm]
-            rewards = [BURN_FRACTION] + [KEEP_FRACTION * frac for _, frac in norm]
+            uids = [UID_ZERO] + [uid for uid, _ in podium]
+            rewards = [BURN_FRACTION] + [KEEP_FRACTION * frac for frac in podium_splits]
             bt.logging.info(
-                f"Proportional mode + burn: UID 0 gets {BURN_FRACTION * 100:.2f}%, "
-                f"{KEEP_FRACTION * 100:.2f}% split across {len(norm)} miner(s)."
+                f"Podium mode + burn: UID 0 gets {BURN_FRACTION * 100:.2f}%, "
+                f"{KEEP_FRACTION * 100:.2f}% split across top {len(podium)} miner(s) "
+                f"with fixed shares {podium_splits}."
             )
             return uids, np.asarray(rewards, dtype=np.float32)
 
-        uids = [uid for uid, _ in norm]
-        rewards = [frac for _, frac in norm]
-        bt.logging.info(f"Proportional mode: 100% split across {len(norm)} miner(s).")
+        uids = [uid for uid, _ in podium]
+        rewards = podium_splits
+        bt.logging.info(
+            f"Podium mode: 100% split across top {len(podium)} miner(s) "
+            f"with fixed shares {podium_splits}."
+        )
         return uids, np.asarray(rewards, dtype=np.float32)
 
     if winner_reward <= 0.0:
