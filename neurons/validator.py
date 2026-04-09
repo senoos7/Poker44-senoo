@@ -27,9 +27,15 @@ from typing import Optional
 import bittensor as bt
 from dotenv import load_dotenv
 
-from poker44 import __version__
+from poker44 import __version__, VALIDATOR_DEPLOY_VERSION
 from poker44.base.validator import BaseValidatorNeuron
 from poker44.utils.config import config
+from poker44.utils.runtime_info import (
+    build_signed_runtime_request,
+    collect_runtime_info,
+    post_runtime_snapshot,
+    write_runtime_snapshot,
+)
 from poker44.utils.wandb_helper import ValidatorWandbHelper
 from poker44.validator.forward import forward as forward_cycle
 from poker44.validator.integrity import (
@@ -46,6 +52,15 @@ load_dotenv()
 os.makedirs("./logs", exist_ok=True)
 bt.logging.set_trace()
 bt.logging(debug=True, trace=False, logging_dir="./logs", record_log=True)
+
+DEFAULT_VALIDATOR_RUNTIME_REPORT_URL = (
+    "https://api.poker44.net/internal/validators/runtime"
+)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = str(os.getenv(name, str(default))).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 class Validator(BaseValidatorNeuron):
@@ -101,6 +116,19 @@ class Validator(BaseValidatorNeuron):
             os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(configured_poll_interval))
         )
         self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "40"))
+        self.synced_window_mode = _env_bool("POKER44_SYNCED_WINDOW_MODE", True)
+        self.sync_all_miners = _env_bool("POKER44_SYNC_ALL_MINERS", False)
+        # Keep synchronized evaluation windows, but default to persistent scoring so
+        # short outages and uneven request coverage do not reset miner rankings.
+        self.sync_direct_score_update = _env_bool(
+            "POKER44_SYNC_DIRECT_SCORE_UPDATE",
+            False,
+        )
+        self.sync_reset_buffers_on_window_change = _env_bool(
+            "POKER44_SYNC_RESET_BUFFERS_ON_WINDOW_CHANGE",
+            False,
+        )
+        self.current_eval_window_id: Optional[int] = None
         self.prediction_buffer = {}
         self.label_buffer = {}
         state_dir = Path(self.config.neuron.full_path)
@@ -136,13 +164,93 @@ class Validator(BaseValidatorNeuron):
             dataset_cfg=self.dataset_cfg,
             poll_interval=self.poll_interval,
             reward_window=self.reward_window,
+            runtime_info=self.runtime_info,
         )
+        bt.logging.info(
+            "🪟 Validator sync mode | "
+            f"synced_window_mode={self.synced_window_mode} "
+            f"sync_all_miners={self.sync_all_miners} "
+            f"direct_score_update={self.sync_direct_score_update} "
+            f"reset_buffers_on_window_change={self.sync_reset_buffers_on_window_change}"
+        )
+        bt.logging.info(
+            "🧾 Validator runtime | "
+            f"uid={self.resolve_uid(self.wallet.hotkey.ss58_address)} "
+            f"hotkey={self.wallet.hotkey.ss58_address} "
+            f"version={__version__} "
+            f"deploy_version={VALIDATOR_DEPLOY_VERSION} "
+            f"git_branch={self.runtime_info.get('git_branch', '')} "
+            f"git_commit={self.runtime_info.get('git_commit_short', '')} "
+            f"git_dirty={self.runtime_info.get('git_dirty', False)}"
+        )
+        self._write_runtime_snapshot(status="started")
 
     def resolve_uid(self, hotkey: str) -> Optional[int]:
         try:
             return self.metagraph.hotkeys.index(hotkey)
         except ValueError:
             return None
+
+    @property
+    def runtime_snapshot_path(self) -> Path:
+        return Path(self.config.neuron.full_path) / "validator_runtime.json"
+
+    @property
+    def runtime_info(self) -> dict:
+        info = getattr(self, "_runtime_info", None)
+        if info is None:
+            info = collect_runtime_info()
+            self._runtime_info = info
+        return info
+
+    def _write_runtime_snapshot(self, *, status: str, extra: Optional[dict] = None) -> None:
+        payload = {
+            "status": status,
+            "validator_uid": self.resolve_uid(self.wallet.hotkey.ss58_address),
+            "hotkey": self.wallet.hotkey.ss58_address,
+            "version": __version__,
+            "deploy_version": VALIDATOR_DEPLOY_VERSION,
+            "netuid": self.config.netuid,
+            "poll_interval": self.poll_interval,
+            "reward_window": self.reward_window,
+            "synced_window_mode": self.synced_window_mode,
+            "sync_all_miners": self.sync_all_miners,
+            "sync_direct_score_update": self.sync_direct_score_update,
+            "runtime": self.runtime_info,
+        }
+        if extra:
+            payload.update(extra)
+        write_runtime_snapshot(self.runtime_snapshot_path, payload)
+        report_url = str(
+            os.getenv(
+                "POKER44_VALIDATOR_RUNTIME_REPORT_URL",
+                DEFAULT_VALIDATOR_RUNTIME_REPORT_URL,
+            )
+        ).strip()
+        if report_url:
+            timeout_seconds = float(
+                os.getenv("POKER44_VALIDATOR_RUNTIME_REPORT_TIMEOUT_SECONDS", "5")
+            )
+            signed_request = build_signed_runtime_request(
+                wallet=self.wallet,
+                url=report_url,
+                payload=payload,
+            )
+            ok, message = post_runtime_snapshot(
+                url=report_url,
+                payload=payload,
+                timeout_seconds=timeout_seconds,
+                **signed_request,
+            )
+            if ok:
+                bt.logging.debug(
+                    f"Validator runtime snapshot reported successfully to collector: {report_url}"
+                )
+            else:
+                bt.logging.warning(
+                    "Validator runtime snapshot report failed | "
+                    f"url={report_url} message={message}"
+                )
 
     async def forward(self, synapse=None):  # type: ignore[override]
         return await forward_cycle(self)
