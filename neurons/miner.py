@@ -65,13 +65,30 @@ class Miner(BaseMinerNeuron):
 
         self.model_manifest = build_local_model_manifest(
             repo_root=repo_root,
-            implementation_files=[Path(__file__).resolve()],
+            # Include all files that define the miner's actual behaviour.
+            # The implementation_sha256 is computed over all of these, making
+            # the manifest auditable: anyone can verify the exact code that
+            # produced any given response.
+            implementation_files=[
+                Path(__file__).resolve(),                                      # neurons/miner.py
+                repo_root / "poker44" / "miner_model" / "detector.py",        # model loader + heuristic
+                repo_root / "poker44" / "miner_model" / "features.py",        # feature engineering
+                repo_root / "poker44" / "miner_model" / "train.py",           # training pipeline
+                repo_root / "poker44" / "miner_model" / "sanitize.py",        # sanitization wrapper
+            ],
             defaults={
                 "model_name": "poker44-rf-bot-detector",
                 "model_version": _model_version,
                 "framework": "scikit-learn",
                 "license": "MIT",
-                "repo_url": "https://github.com/Poker44/Poker44-subnet",
+                # ⚠️  Must point to YOUR OWN fork/repo, NOT the reference subnet repo.
+                # Using the reference repo URL (Poker44/Poker44-subnet) with a custom
+                # model_name triggers the repo_url_must_point_to_model_repo policy
+                # violation and marks the miner as opaque.
+                "repo_url": os.getenv(
+                    "POKER44_MODEL_REPO_URL",
+                    "https://github.com/senoos7/Poker44-senoo",
+                ),
                 "repo_commit": _auto_commit,
                 "notes": "RandomForest bot-detector trained on mixed human/bot chunk data.",
                 "open_source": True,

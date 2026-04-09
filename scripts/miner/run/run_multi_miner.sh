@@ -39,6 +39,12 @@ PYTHON="${PYTHON:-$(which python3)}"
 # Default model version — used when a miner entry has no 5th field or "-"
 DEFAULT_MODEL_VERSION="${DEFAULT_MODEL_VERSION:-v4_rf_mixed}"
 
+# Your fork URL — used in the open-source manifest so the validator marks
+# this miner as "transparent" (not "opaque").
+# Must NOT be the reference repo (https://github.com/Poker44/Poker44-subnet)
+# unless model_name = poker44-reference-heuristic.
+export POKER44_MODEL_REPO_URL="${POKER44_MODEL_REPO_URL:-https://github.com/senoos7/Poker44-senoo}"
+
 # Allowlisted validator hotkeys (space-separated).
 _DEFAULT_VALIDATOR_HOTKEYS=(
   5E2LP6EnZ54m3wS8s1yPvD5c3xo71kQroBw7aUVK32TKeZ5u
@@ -68,6 +74,8 @@ MINERS=(
   "superbit-darnsin  poker-miner-26007  8097  poker44_miner_7   v4_rf_mixed"
   # Example: different coldkey
   # "my-other-wallet  poker-miner-new01  8101  poker44_miner_n1  v4_rf_mixed"
+  "darnsin00 poker-miner-03281  8200  poker44_miner_20  v4_rf_mixed"
+  "darnsin00 poker-miner-04081  8201  poker44_miner_21  v4_rf_mixed"
 )
 
 # ----------------------------------------------------------------

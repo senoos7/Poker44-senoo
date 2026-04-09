@@ -39,6 +39,12 @@ PYTHON="${PYTHON:-$(which python3)}"
 # Default model version — used when a miner entry has no 5th field or "-"
 DEFAULT_MODEL_VERSION="${DEFAULT_MODEL_VERSION:-v4_rf_mixed}"
 
+# Your fork URL — used in the open-source manifest so the validator marks
+# this miner as "transparent" (not "opaque").
+# Must NOT be the reference repo (https://github.com/Poker44/Poker44-subnet)
+# unless model_name = poker44-reference-heuristic.
+export POKER44_MODEL_REPO_URL="${POKER44_MODEL_REPO_URL:-https://github.com/senoos7/Poker44-senoo}"
+
 # Allowlisted validator hotkeys (space-separated).
 _DEFAULT_VALIDATOR_HOTKEYS=(
   5E2LP6EnZ54m3wS8s1yPvD5c3xo71kQroBw7aUVK32TKeZ5u
@@ -64,6 +70,7 @@ MINERS=(
   "superbit-darnsin  poker-miner-26008  8098  poker44_miner_8   v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26009  8099  poker44_miner_9   v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26010  8100  poker44_miner_10  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26011  8101  poker44_miner_11  v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26012  8102  poker44_miner_12  v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26013  8103  poker44_miner_13  v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26014  8104  poker44_miner_14  v4_rf_mixed_large"
