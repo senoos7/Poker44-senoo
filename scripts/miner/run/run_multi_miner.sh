@@ -75,8 +75,8 @@ MINERS=(
   # Example: different coldkey
   # "my-other-wallet  poker-miner-new01  8101  poker44_miner_n1  v4_rf_mixed"
   "darnsin00 poker-miner-03281  8200  poker44_miner_20  v4_rf_mixed_large"
-  # "darnsin00 poker-miner-04081  8201  poker44_miner_21  v4_rf_mixed_large"
-  # "darnsin00 poker-miner-04082  8202  poker44_miner_22  v4_rf_mixed_large"
+  "darnsin00 poker-miner-04081  8201  poker44_miner_21  v4_rf_mixed_large"
+  "darnsin00 poker-miner-04082  8202  poker44_miner_22  v4_rf_mixed_large"
 )
 
 # ----------------------------------------------------------------
