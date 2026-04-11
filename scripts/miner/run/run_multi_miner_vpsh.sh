@@ -87,6 +87,12 @@ MINERS=(
   "superbit-darnsin  poker-miner-26026  8116  poker44_miner_26  v4_rf_mixed_large"
   # Example: different coldkey
   # "my-other-wallet  poker-miner-new01  8120  poker44_miner_n1  v4_rf_mixed_large"
+  "darnsin01 poker-miner-04113  8200  poker44_miner_4113  v4_rf_mixed_large"
+  # "darnsin01 poker-miner-04114  8201  poker44_miner_4114  v4_rf_mixed_large"
+  "darnsin01 poker-miner-04115  8202  poker44_miner_4115  v4_rf_mixed_large"
+  # "darnsin01 poker-miner-04116  8203  poker44_miner_4116  v4_rf_mixed_large"
+  "darnsin01 poker-miner-04117  8204  poker44_miner_4117  v4_rf_mixed_large"
+  # "darnsin01 poker-miner-04118  8205  poker44_miner_4118  v4_rf_mixed_large"
 )
 
 # ----------------------------------------------------------------
