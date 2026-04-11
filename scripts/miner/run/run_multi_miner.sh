@@ -81,7 +81,8 @@ MINERS=(
   "darnsin00 poker-miner-04102  8204  poker44_miner_24  v4_rf_mixed_large"
   "darnsin00 poker-miner-04103  8205  poker44_miner_25  v4_rf_mixed_large"
   "darnsin00 poker-miner-04104  8206  poker44_miner_26  v4_rf_mixed_large"
-  # "darnsin00 poker-miner-04105  8207  poker44_miner_27  v4_rf_mixed_large"
+  "darnsin00 poker-miner-04105  8207  poker44_miner_27  v4_rf_mixed_large"
+  "darnsin00 poker-miner-04111  8208  poker44_miner_28  v4_rf_mixed_large"
 )
 
 # ----------------------------------------------------------------
