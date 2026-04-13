@@ -76,12 +76,12 @@ MINERS=(
   "darnsin00 poker-miner-04105  8207  poker44_miner_27  v4_rf_mixed_large"
   "darnsin00 poker-miner-04111  8208  poker44_miner_28  v4_rf_mixed_large"
   # Example: different coldkey
-  "darnsin01 poker-miner-04113  8200  poker44_miner_4113  v4_rf_mixed_large"
-  "darnsin01 poker-miner-04114  8201  poker44_miner_4114  v4_rf_mixed_large"
-  "darnsin01 poker-miner-04115  8202  poker44_miner_4115  v4_rf_mixed_large"
-  "darnsin01 poker-miner-04116  8203  poker44_miner_4116  v4_rf_mixed_large"
-  "darnsin01 poker-miner-04117  8204  poker44_miner_4117  v4_rf_mixed_large"
-  "darnsin01 poker-miner-04118  8205  poker44_miner_4118  v4_rf_mixed_large"
+  "darnsin01 poker-miner-04113  8300  poker44_miner_4113  v4_rf_mixed_large"
+  "darnsin01 poker-miner-04114  8301  poker44_miner_4114  v4_rf_mixed_large"
+  "darnsin01 poker-miner-04115  8302  poker44_miner_4115  v4_rf_mixed_large"
+  "darnsin01 poker-miner-04116  8303  poker44_miner_4116  v4_rf_mixed_large"
+  "darnsin01 poker-miner-04117  8304  poker44_miner_4117  v4_rf_mixed_large"
+  "darnsin01 poker-miner-04118  8305  poker44_miner_4118  v4_rf_mixed_large"
 )
 
 # ----------------------------------------------------------------
