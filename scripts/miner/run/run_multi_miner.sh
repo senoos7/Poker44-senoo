@@ -66,14 +66,6 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # ----------------------------------------------------------------
 MINERS=(
   # wallet-name           hotkey               port  pm2-name            model-version
-  "superbit-darnsin  poker-miner-26002  8092  poker44_miner_2   v4_rf_mixed"
-  "superbit-darnsin  poker-miner-26003  8093  poker44_miner_3   v4_rf_mixed"
-  "superbit-darnsin  poker-miner-26004  8094  poker44_miner_4   v4_rf_mixed"
-  "superbit-darnsin  poker-miner-26005  8095  poker44_miner_5   v4_rf_mixed"
-  "superbit-darnsin  poker-miner-26006  8096  poker44_miner_6   v4_rf_mixed"
-  "superbit-darnsin  poker-miner-26007  8097  poker44_miner_7   v4_rf_mixed"
-  # Example: different coldkey
-  # "my-other-wallet  poker-miner-new01  8101  poker44_miner_n1  v4_rf_mixed"
   "darnsin00 poker-miner-03281  8200  poker44_miner_20  v4_rf_mixed_large"
   "darnsin00 poker-miner-04081  8201  poker44_miner_21  v4_rf_mixed_large"
   "darnsin00 poker-miner-04082  8202  poker44_miner_22  v4_rf_mixed_large"
@@ -83,6 +75,13 @@ MINERS=(
   "darnsin00 poker-miner-04104  8206  poker44_miner_26  v4_rf_mixed_large"
   "darnsin00 poker-miner-04105  8207  poker44_miner_27  v4_rf_mixed_large"
   "darnsin00 poker-miner-04111  8208  poker44_miner_28  v4_rf_mixed_large"
+  # Example: different coldkey
+  "darnsin01 poker-miner-04113  8200  poker44_miner_4113  v4_rf_mixed_large"
+  "darnsin01 poker-miner-04114  8201  poker44_miner_4114  v4_rf_mixed_large"
+  "darnsin01 poker-miner-04115  8202  poker44_miner_4115  v4_rf_mixed_large"
+  "darnsin01 poker-miner-04116  8203  poker44_miner_4116  v4_rf_mixed_large"
+  "darnsin01 poker-miner-04117  8204  poker44_miner_4117  v4_rf_mixed_large"
+  "darnsin01 poker-miner-04118  8205  poker44_miner_4118  v4_rf_mixed_large"
 )
 
 # ----------------------------------------------------------------
