@@ -7,6 +7,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -28,6 +29,30 @@ def _normalize_base_url(value: str) -> str:
 def _compute_batches_hash(batches: Sequence[Mapping[str, Any]]) -> str:
     payload = json.dumps(list(batches), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _current_competition_epoch(now: Optional[datetime] = None) -> Dict[str, Any]:
+    current = now or datetime.now(timezone.utc)
+    days_since_monday = current.weekday()
+    start = datetime(
+        current.year,
+        current.month,
+        current.day,
+        20,
+        0,
+        0,
+        tzinfo=timezone.utc,
+    ) - timedelta(days=days_since_monday)
+    if current < start:
+        start -= timedelta(days=7)
+    end = start + timedelta(days=7)
+    return {
+        "competition_epoch_id": f"week_{start.date().isoformat()}_2000utc",
+        "competition_epoch_start": start.isoformat(),
+        "competition_epoch_end": end.isoformat(),
+        "competition_settlement_mode": "winner_take_all",
+        "competition_seconds_remaining": max(0, int((end - current).total_seconds())),
+    }
 
 
 @dataclass(frozen=True)
@@ -84,6 +109,7 @@ class ProviderRuntimeConfig:
             "require_mixed": self.require_mixed,
             "attempt_publish_current": self.attempt_publish_current,
             "mark_evaluated": self.mark_evaluated,
+            **_current_competition_epoch(),
         }
 
 
@@ -153,10 +179,12 @@ class ProviderRuntimeManager:
                 self.status["ready_for_evaluation"] = bool(eval_health.get("readyForEvaluation"))
                 self.status["window_start"] = str(eval_health.get("windowStart") or "")
                 self.status["window_end"] = str(eval_health.get("windowEnd") or "")
+                self.status.update(_current_competition_epoch())
             return ok
         except Exception as exc:
             self.status["runtime_ready"] = False
             self.status["last_error"] = str(exc)
+            self.status.update(_current_competition_epoch())
             return False
 
 
@@ -170,6 +198,26 @@ class ProviderRuntimeDatasetProvider:
         self._stats: Dict[str, Any] = cfg.public_summary()
         self._pending_hand_ids: List[str] = []
         self._active_chunk_id: str = ""
+
+    def get_competition_settlement_weights(self) -> Dict[str, Any]:
+        try:
+            payload = self.manager.client.get("/internal/competition/current/weights")
+            if not isinstance(payload, dict):
+                raise RuntimeError("Unexpected competition settlement payload shape")
+            return payload
+        except Exception as exc:
+            bt.logging.warning(f"Competition settlement weights fetch failed: {exc}")
+            return {
+                "epochId": self.stats.get("competition_epoch_id"),
+                "settlementMode": "winner_take_all",
+                "status": "unavailable",
+                "sourceEpochId": None,
+                "settledAt": None,
+                "winnerUid": None,
+                "winnerHotkey": None,
+                "reason": str(exc),
+                "weights": [],
+            }
 
     @property
     def dataset_hash(self) -> str:

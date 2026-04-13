@@ -22,9 +22,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
-
-import numpy as np
+from typing import Any, Optional
 
 import bittensor as bt
 from dotenv import load_dotenv
@@ -32,6 +30,7 @@ from dotenv import load_dotenv
 from poker44 import __version__, VALIDATOR_DEPLOY_VERSION
 from poker44.base.validator import BaseValidatorNeuron
 from poker44.utils.config import config
+from poker44.utils.network_snapshot import collect_network_snapshot
 from poker44.utils.runtime_info import (
     build_signed_runtime_request,
     collect_runtime_info,
@@ -62,11 +61,9 @@ bt.logging(debug=True, trace=False, logging_dir="./logs", record_log=True)
 DEFAULT_VALIDATOR_RUNTIME_REPORT_URL = (
     "https://api.poker44.net/internal/validators/runtime"
 )
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw = str(os.getenv(name, str(default))).strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+DEFAULT_NETWORK_SNAPSHOT_REPORT_URL = (
+    "https://api.poker44.net/internal/network/snapshots"
+)
 
 
 class Validator(BaseValidatorNeuron):
@@ -76,16 +73,6 @@ class Validator(BaseValidatorNeuron):
         cfg = config(Validator)
         self.poll_interval = None
         self.reward_window = None
-        self.synced_window_mode = None
-        self.sync_all_miners = None
-        self.sync_direct_score_update = None
-        self.coverage_round_index = 0
-        self.coverage_round_expected_uids = []
-        self.coverage_round_seen_uids = set()
-        self.coverage_round_reward_sums = {}
-        self.coverage_round_reward_counts = {}
-        self.coverage_round_pending_set_weights = False
-        self.coverage_round_completed_at_step = None
         super().__init__(config=cfg)
         bt.logging.info(f"🚀 Poker44 Validator v{__version__} started")
 
@@ -112,7 +99,7 @@ class Validator(BaseValidatorNeuron):
             human_json_env = os.getenv("POKER44_HUMAN_JSON_PATH")
             if not human_json_env:
                 raise RuntimeError(
-                    "POKER44_HUMAN_JSON_PATH must point to the private local human-hand JSON used by validators."
+                    "POKER44_HUMAN_JSON_PATH must point to the local human-hand JSON used by validators."
                 )
 
             human_json_path = Path(human_json_env).expanduser().resolve()
@@ -180,6 +167,9 @@ class Validator(BaseValidatorNeuron):
         )
         self.prediction_buffer = {}
         self.label_buffer = {}
+        self.coverage_buffer = {}
+        self.latency_buffer = {}
+        self.competition_scores_payload = []
         state_dir = Path(self.config.neuron.full_path)
         self.model_manifest_path = state_dir / "model_manifests.json"
         self.compliance_registry_path = state_dir / "compliance_registry.json"
@@ -215,23 +205,8 @@ class Validator(BaseValidatorNeuron):
             reward_window=self.reward_window,
             runtime_info=self.runtime_info,
         )
-        bt.logging.info(
-            "🪟 Validator sync mode | "
-            f"synced_window_mode={self.synced_window_mode} "
-            f"sync_all_miners={self.sync_all_miners} "
-            f"direct_score_update={self.sync_direct_score_update} "
-            f"reset_buffers_on_window_change={self.sync_reset_buffers_on_window_change}"
-        )
-        bt.logging.info(
-            "🧾 Validator runtime | "
-            f"uid={self.resolve_uid(self.wallet.hotkey.ss58_address)} "
-            f"hotkey={self.wallet.hotkey.ss58_address} "
-            f"version={__version__} "
-            f"deploy_version={VALIDATOR_DEPLOY_VERSION} "
-            f"git_branch={self.runtime_info.get('git_branch', '')} "
-            f"git_commit={self.runtime_info.get('git_commit_short', '')} "
-            f"git_dirty={self.runtime_info.get('git_dirty', False)}"
-        )
+        self.deploy_version = VALIDATOR_DEPLOY_VERSION
+        self.version = __version__
         self._write_runtime_snapshot(status="started")
 
     def resolve_uid(self, hotkey: str) -> Optional[int]:
@@ -245,7 +220,11 @@ class Validator(BaseValidatorNeuron):
         return Path(self.config.neuron.full_path) / "validator_runtime.json"
 
     @property
-    def runtime_info(self) -> dict:
+    def network_snapshot_path(self) -> Path:
+        return Path(self.config.neuron.full_path) / "network_snapshot.json"
+
+    @property
+    def runtime_info(self) -> dict[str, Any]:
         info = getattr(self, "_runtime_info", None)
         if info is None:
             info = collect_runtime_info()
@@ -253,6 +232,11 @@ class Validator(BaseValidatorNeuron):
         return info
 
     def _write_runtime_snapshot(self, *, status: str, extra: Optional[dict] = None) -> None:
+        provider_stats = (
+            getattr(self.provider, "stats", {})
+            if hasattr(self, "provider") and hasattr(self.provider, "stats")
+            else {}
+        )
         payload = {
             "status": status,
             "validator_uid": self.resolve_uid(self.wallet.hotkey.ss58_address),
@@ -260,17 +244,25 @@ class Validator(BaseValidatorNeuron):
             "version": __version__,
             "deploy_version": VALIDATOR_DEPLOY_VERSION,
             "netuid": self.config.netuid,
+            "runtime_mode": self.runtime_mode,
             "poll_interval": getattr(self, "poll_interval", None),
             "reward_window": getattr(self, "reward_window", None),
-            "synced_window_mode": getattr(self, "synced_window_mode", None),
-            "sync_all_miners": getattr(self, "sync_all_miners", None),
-            "sync_direct_score_update": getattr(self, "sync_direct_score_update", None),
-            "coverage_round_index": getattr(self, "coverage_round_index", None),
-            "coverage_round_expected_count": len(getattr(self, "coverage_round_expected_uids", []) or []),
-            "coverage_round_seen_count": len(getattr(self, "coverage_round_seen_uids", set()) or set()),
-            "coverage_round_pending_set_weights": getattr(
-                self, "coverage_round_pending_set_weights", None
-            ),
+            "chunk_batch_size": getattr(self, "chunk_batch_size", None),
+            "step": int(getattr(self, "step", 0)),
+            "score_slots": int(len(getattr(self, "scores", []))) if hasattr(self, "scores") else 0,
+            "nonzero_scores": int((getattr(self, "scores", []) != 0).sum())
+            if hasattr(self, "scores")
+            else 0,
+            "dataset_stats": provider_stats,
+            "competition_epoch_id": provider_stats.get("competition_epoch_id"),
+            "competition_epoch_start": provider_stats.get("competition_epoch_start"),
+            "competition_epoch_end": provider_stats.get("competition_epoch_end"),
+            "competition_settlement_mode": provider_stats.get("competition_settlement_mode"),
+            "active_window_start": provider_stats.get("active_window_start"),
+            "active_window_end": provider_stats.get("active_window_end"),
+            "active_chunk_id": provider_stats.get("active_chunk_id"),
+            "active_chunk_hash": provider_stats.get("active_chunk_hash"),
+            "competition_scores": list(getattr(self, "competition_scores_payload", []) or []),
             "runtime": self.runtime_info,
         }
         if extra:
@@ -305,6 +297,39 @@ class Validator(BaseValidatorNeuron):
                 bt.logging.warning(
                     "Validator runtime snapshot report failed | "
                     f"url={report_url} message={message}"
+                )
+
+        network_snapshot = collect_network_snapshot(self)
+        write_runtime_snapshot(self.network_snapshot_path, network_snapshot)
+        network_report_url = str(
+            os.getenv(
+                "POKER44_VALIDATOR_NETWORK_SNAPSHOT_REPORT_URL",
+                DEFAULT_NETWORK_SNAPSHOT_REPORT_URL,
+            )
+        ).strip()
+        if network_report_url:
+            timeout_seconds = float(
+                os.getenv("POKER44_VALIDATOR_NETWORK_SNAPSHOT_TIMEOUT_SECONDS", "5")
+            )
+            signed_request = build_signed_runtime_request(
+                wallet=self.wallet,
+                url=network_report_url,
+                payload=network_snapshot,
+            )
+            ok, message = post_runtime_snapshot(
+                url=network_report_url,
+                payload=network_snapshot,
+                timeout_seconds=timeout_seconds,
+                **signed_request,
+            )
+            if ok:
+                bt.logging.debug(
+                    f"Validator network snapshot reported successfully to collector: {network_report_url}"
+                )
+            else:
+                bt.logging.warning(
+                    "Validator network snapshot report failed | "
+                    f"url={network_report_url} message={message}"
                 )
 
     async def forward(self, synapse=None):  # type: ignore[override]

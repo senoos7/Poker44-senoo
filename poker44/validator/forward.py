@@ -211,10 +211,17 @@ async def _run_forward_cycle(validator) -> None:
         attempts=3,
     )
     bt.logging.info(f"Received {len(synapse_responses)} responses from miners")
+
+    expected_chunk_count = len(chunks)
+    response_metadata: Dict[int, Dict[str, Any]] = {}
     
     for uid, resp in zip(miner_uids, synapse_responses):
         if resp is None:
             bt.logging.debug(f"Miner {uid} returned None response")
+            response_metadata[uid] = {
+                "coverage_rate": 0.0,
+                "latency_seconds": None,
+            }
             continue
 
         _record_model_manifest(
@@ -227,6 +234,10 @@ async def _run_forward_cycle(validator) -> None:
         scores = getattr(resp, "risk_scores", None)
         if scores is None:
             bt.logging.debug(f"Miner {uid} returned no risk_scores")
+            response_metadata[uid] = {
+                "coverage_rate": 0.0,
+                "latency_seconds": _extract_latency_seconds(resp),
+            }
             continue
             
         try:
@@ -243,6 +254,20 @@ async def _run_forward_cycle(validator) -> None:
                 effective_labels = batch_labels[:min_len]
             else:
                 effective_labels = batch_labels
+
+            coverage_rate = (
+                float(len(scores_f)) / float(expected_chunk_count)
+                if expected_chunk_count > 0
+                else 0.0
+            )
+            latency_seconds = _extract_latency_seconds(resp)
+            response_metadata[uid] = {
+                "coverage_rate": coverage_rate,
+                "latency_seconds": latency_seconds,
+            }
+            validator.coverage_buffer.setdefault(uid, []).append(coverage_rate)
+            if latency_seconds is not None:
+                validator.latency_buffer.setdefault(uid, []).append(latency_seconds)
             
             responses[uid].extend(scores_f)
             cycle_predictions[uid].extend(scores_f)
@@ -269,7 +294,20 @@ async def _run_forward_cycle(validator) -> None:
             bt.logging.warning(f"Error processing response from miner {uid}: {e}")
             import traceback
             bt.logging.debug(traceback.format_exc())
+            response_metadata[uid] = {
+                "coverage_rate": 0.0,
+                "latency_seconds": _extract_latency_seconds(resp),
+            }
             continue
+
+    for uid in miner_uids:
+        if uid in response_metadata:
+            continue
+        response_metadata[uid] = {
+            "coverage_rate": 0.0,
+            "latency_seconds": None,
+        }
+        validator.coverage_buffer.setdefault(uid, []).append(0.0)
     
     if not any(responses.values()):
         bt.logging.info("No miner responses this cycle.")
@@ -303,7 +341,12 @@ async def _run_forward_cycle(validator) -> None:
         rewards_array, metrics = _compute_windowed_rewards(validator, miner_uids)
     reward_map = dict(zip(miner_uids, rewards_array.tolist()))
     metrics_map = {uid: metric for uid, metric in zip(miner_uids, metrics)}
-    validator.record_round_cycle(sampled_uids=miner_uids, reward_map=reward_map)
+    validator.competition_scores_payload = _build_competition_scores_payload(
+        validator,
+        miner_uids=miner_uids,
+        metrics_map=metrics_map,
+        response_metadata=response_metadata,
+    )
     bt.logging.info(f"Reward map by UID: {reward_map}")
     bt.logging.info(f"Reward metrics by UID: {metrics_map}")
     winner_uids, winner_rewards = _select_weight_targets(reward_map)
@@ -618,6 +661,12 @@ def _compute_windowed_rewards(validator, miner_uids: List[int]) -> tuple[np.ndar
     for uid in miner_uids:
         pred_buf = validator.prediction_buffer.get(uid, [])
         label_buf = validator.label_buffer.get(uid, [])
+        coverage_buf = validator.coverage_buffer.get(uid, [])
+        latency_buf = validator.latency_buffer.get(uid, [])
+        coverage_rate = float(np.mean(coverage_buf[-window:])) if coverage_buf else 0.0
+        latency_mean_seconds = (
+            float(np.mean(latency_buf[-window:])) if latency_buf else None
+        )
 
         if len(pred_buf) < window or len(label_buf) < window:
             rewards.append(0.0)
@@ -629,6 +678,9 @@ def _compute_windowed_rewards(validator, miner_uids: List[int]) -> tuple[np.ndar
                     "human_safety_penalty": 0.0,
                     "base_score": 0.0,
                     "reward": 0.0,
+                    "coverage_rate": coverage_rate,
+                    "latency_mean_seconds": latency_mean_seconds,
+                    "sample_count": min(len(pred_buf), len(label_buf)),
                 }
             )
             continue
@@ -636,6 +688,9 @@ def _compute_windowed_rewards(validator, miner_uids: List[int]) -> tuple[np.ndar
         preds_window = np.asarray(pred_buf[-window:], dtype=float)
         labels_window = np.asarray(label_buf[-window:], dtype=bool)
         rew, metric = reward(preds_window, labels_window)
+        metric["coverage_rate"] = coverage_rate
+        metric["latency_mean_seconds"] = latency_mean_seconds
+        metric["sample_count"] = int(min(len(pred_buf), len(label_buf)))
         rewards.append(rew)
         metrics.append(metric)
 
@@ -644,54 +699,68 @@ def _compute_windowed_rewards(validator, miner_uids: List[int]) -> tuple[np.ndar
     return rewards_array, metrics
 
 
-def _compute_cycle_rewards(
-    miner_uids: List[int],
+def _extract_latency_seconds(resp: Any) -> float | None:
+    dendrite_info = getattr(resp, "dendrite", None)
+    process_time = getattr(dendrite_info, "process_time", None)
+    if process_time is None:
+        return None
+    try:
+        value = float(process_time)
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+def _build_competition_scores_payload(
+    validator,
     *,
-    cycle_predictions: Dict[int, List[float]],
-    cycle_labels: Dict[int, List[int]],
-) -> tuple[np.ndarray, list]:
-    rewards: List[float] = []
-    metrics: List[dict] = []
+    miner_uids: List[int],
+    metrics_map: Dict[int, Dict[str, Any]],
+    response_metadata: Dict[int, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    manifests = getattr(validator, "model_manifest_registry", {}) or {}
+    hotkeys = list(getattr(validator.metagraph, "hotkeys", []) or [])
 
     for uid in miner_uids:
-        preds = cycle_predictions.get(uid, [])
-        labels = cycle_labels.get(uid, [])
+        metric = metrics_map.get(uid, {})
+        response_meta = response_metadata.get(uid, {})
+        manifest_entry = manifests.get(uid) or manifests.get(str(uid)) or {}
+        manifest = manifest_entry.get("model_manifest") or {}
 
-        if not preds or not labels or len(preds) != len(labels):
-            rewards.append(0.0)
-            metrics.append(
-                {
-                    "fpr": 1.0,
-                    "bot_recall": 0.0,
-                    "ap_score": 0.0,
-                    "human_safety_penalty": 0.0,
-                    "base_score": 0.0,
-                    "reward": 0.0,
-                }
-            )
-            continue
+        rows.append(
+            {
+                "uid": int(uid),
+                "hotkey": hotkeys[uid] if uid < len(hotkeys) else "",
+                "manifest_digest": manifest_entry.get("manifest_digest"),
+                "implementation_sha256": manifest.get("implementation_sha256"),
+                "model_name": manifest.get("model_name"),
+                "model_version": manifest.get("model_version"),
+                "repo_url": manifest.get("repo_url"),
+                "repo_commit": manifest.get("repo_commit"),
+                "open_source": manifest.get("open_source"),
+                "reward": float(metric.get("reward", 0.0) or 0.0),
+                "ap_score": float(metric.get("ap_score", 0.0) or 0.0),
+                "bot_recall": float(metric.get("bot_recall", 0.0) or 0.0),
+                "human_safety_penalty": float(
+                    metric.get("human_safety_penalty", 0.0) or 0.0
+                ),
+                "coverage_rate": float(
+                    metric.get(
+                        "coverage_rate",
+                        response_meta.get("coverage_rate", 0.0),
+                    )
+                    or 0.0
+                ),
+                "latency_mean_seconds": metric.get(
+                    "latency_mean_seconds",
+                    response_meta.get("latency_seconds"),
+                ),
+                "sample_count": int(metric.get("sample_count", 0) or 0),
+            }
+        )
 
-        preds_arr = np.asarray(preds, dtype=float)
-        labels_arr = np.asarray(labels, dtype=bool)
-        rew, metric = reward(preds_arr, labels_arr)
-        rewards.append(rew)
-        metrics.append(metric)
-
-    return np.asarray(rewards, dtype=np.float32), metrics
-
-
-def _apply_synced_scores(
-    validator,
-    winner_uids: List[int],
-    winner_rewards: np.ndarray,
-) -> None:
-    validator.scores = np.zeros_like(validator.scores)
-    for uid, reward_value in zip(winner_uids, winner_rewards.tolist()):
-        validator.scores[int(uid)] = float(reward_value)
-    bt.logging.info(
-        "Applied direct synchronized score vector for current evaluation window "
-        f"(weight_targets={len(winner_uids)})."
-    )
+    return rows
 
 
 def _select_weight_targets(reward_map: Dict[int, float]) -> tuple[List[int], np.ndarray]:

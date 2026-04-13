@@ -87,6 +87,35 @@ The current production source is:
 6. the backend publishes an active canonical chunk for the epoch/window;
 7. validators read that active chunk through `/internal/eval/current`.
 
+## Observability And Competition Signals
+
+In `dev`, the validator also publishes two signed observability payloads:
+
+- `validator_runtime.json`
+- `network_snapshot.json`
+
+These are best-effort and are not part of the scoring path. They exist so the
+platform can expose:
+
+- validator runtime alignment;
+- live network/miner state from validator-signed metagraph snapshots;
+- a weekly competition surface built on top of the canonical eval feed.
+
+The intended competition model is:
+
+- weekly epoch (Monday 20:00 UTC to Monday 20:00 UTC);
+- continuous evaluation on canonical live hands during the epoch;
+- public provisional leaderboard during the week;
+- winner-take-all settlement after the epoch closes.
+
+Settlement behavior in `dev` now follows a platform-decided pattern:
+
+- during the week, validators continue using local score-based weights;
+- after the backend settles the latest closed epoch, validators fetch the
+  canonical settlement vector from `/internal/competition/current/weights`;
+- if no epoch has been settled yet, validators fall back safely rather than
+  blocking `set_weights()`.
+
 Important nuance:
 
 - source hands come from mixed live tables;
@@ -176,6 +205,11 @@ Mandatory for production:
 - `HOTKEY`
 - `POKER44_EVAL_API_BASE_URL`
 - `POKER44_PROVIDER_INTERNAL_SECRET`
+
+Optional observability/reporting:
+
+- `POKER44_VALIDATOR_RUNTIME_REPORT_URL`
+- `POKER44_VALIDATOR_NETWORK_SNAPSHOT_REPORT_URL`
 
 Important defaults in the current script:
 
