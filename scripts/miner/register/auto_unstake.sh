@@ -21,7 +21,8 @@
 #   --password <pass>               (omit to be prompted)
 #   --delay-seconds <n>             sleep after each *successful* unstake (default: 18)
 #   --retry-delay-seconds <n>       base sleep on outdated retry (default: 24)
-#   --full                          unstake all hotkeys on this coldkey for --netuid (uses btcli --all-hotkeys)
+#   --full                          unstake all hotkeys on this coldkey for --netuid (enumerates wallet/hotkeys/ individually;
+#                                   deregistered / pruned hotkeys are silently skipped — no HotKeyAccountNotExists errors)
 #   --max-retries <n>               per hotkey or per --full run (default: 8)
 #   --alpha-only                    pass --all-alpha instead of --all (alpha stake only)
 #   --wait-finalization             pass --wait-for-finalization (only if your btcli supports it)
@@ -160,7 +161,7 @@ echo -e "  coldkey     : ${WALLET_NAME}"
 echo -e "  netuid      : ${NETUID}"
 echo -e "  network     : ${NETWORK}"
 if [[ "$FULL_MODE" -eq 1 ]]; then
-    echo -e "  mode        : ${BOLD}full${RESET} (all hotkeys via --all-hotkeys)"
+    echo -e "  mode        : ${BOLD}full${RESET} (per-hotkey from ~/.bittensor/wallets/${WALLET_NAME}/hotkeys/)"
 else
     echo -e "  hotkeys     : ${#hotkeys_list[@]}"
 fi
@@ -215,8 +216,8 @@ EOF
 
         echo "${output}"
 
-        if echo "${output}" | grep -qiE "Not enough stake|no stake|nothing to unstake|0\\.0+.*stake|Insufficient stake"; then
-            echo -e "${YELLOW}  Skip (no / negligible stake): ${label}${RESET}"
+        if echo "${output}" | grep -qiE "Not enough stake|no stake|nothing to unstake|0\\.0+.*stake|Insufficient stake|HotKeyAccountNotExists|HotkeyAccountNotExists|hotkey.*does not exist|does not exist.*hotkey"; then
+            echo -e "${YELLOW}  Skip (no stake / account not on-chain): ${label}${RESET}"
             return 0
         fi
 
@@ -253,10 +254,38 @@ unstake_one_hotkey() {
 
 failed=0
 if [[ "$FULL_MODE" -eq 1 ]]; then
-    if ! run_unstake_attempt "all-hotkeys (--full)" "--all-hotkeys"; then
-        failed=1
+    # --full: enumerate hotkeys from wallet filesystem and call each one
+    # individually. This avoids btcli's --all-hotkeys batch flag which fails
+    # the entire transaction if any single hotkey has no on-chain account
+    # (HotKeyAccountNotExists for deregistered / pruned hotkeys).
+    WALLET_PATH="${BITTENSOR_WALLET_PATH:-${HOME}/.bittensor/wallets}"
+    HOTKEYS_DIR="${WALLET_PATH}/${WALLET_NAME}/hotkeys"
+    if [[ ! -d "$HOTKEYS_DIR" ]]; then
+        echo -e "${RED}Error: hotkeys directory not found: ${HOTKEYS_DIR}${RESET}"
+        echo -e "${YELLOW}Hint: set BITTENSOR_WALLET_PATH if your wallets are not in ~/.bittensor/wallets${RESET}"
+        exit 1
     fi
-    sleep "$DELAY_AFTER_OK_SECS"
+
+    mapfile -t full_hotkeys < <(ls -1 "$HOTKEYS_DIR" 2>/dev/null | sort)
+    if [[ ${#full_hotkeys[@]} -eq 0 ]]; then
+        echo -e "${YELLOW}No hotkeys found in ${HOTKEYS_DIR}${RESET}"
+        exit 0
+    fi
+
+    echo -e "${CYAN}Found ${#full_hotkeys[@]} hotkey(s) in wallet '${WALLET_NAME}': ${full_hotkeys[*]}${RESET}"
+    echo ""
+
+    idx=0
+    for hk in "${full_hotkeys[@]}"; do
+        idx=$((idx + 1))
+        echo -e "${BOLD}[${idx}/${#full_hotkeys[@]}] Processing: ${hk}${RESET}"
+        if ! unstake_one_hotkey "$hk"; then
+            failed=$((failed + 1))
+        fi
+        if [[ $idx -lt ${#full_hotkeys[@]} ]]; then
+            sleep "$DELAY_AFTER_OK_SECS"
+        fi
+    done
 else
     for hk in "${hotkeys_list[@]}"; do
         if ! unstake_one_hotkey "$hk"; then
