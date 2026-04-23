@@ -175,10 +175,11 @@ else
 fi
 echo ""
 
-# $1 = log label   $2 = extra args after --netuid (either: --include-hotkeys NAME  or  --all-hotkeys)
+# $1 = log label   $2 = hotkey name (for --wallet-hotkey)
+# Builds: btcli stake remove --wallet-name <cold> --wallet-hotkey <hk> --netuid <n> --all --yes
 run_unstake_attempt() {
     local label="$1"
-    local hk_target_args="$2"
+    local hk_name="$2"
     local attempt=0
     local output
     local rc
@@ -200,7 +201,7 @@ run_unstake_attempt() {
             expect <<EOF
 log_user 1
 set timeout 600
-spawn ${BTCLI_BIN} stake remove --subtensor.network ${NETWORK} --wallet-name ${WALLET_NAME} --netuid ${NETUID} ${hk_target_args} ${ALL_FLAG[*]} --yes ${wait_args[*]} ${EXTRA_ARGS[*]}
+spawn ${BTCLI_BIN} stake remove --subtensor.network ${NETWORK} --wallet-name ${WALLET_NAME} --wallet-hotkey ${hk_name} --netuid ${NETUID} ${ALL_FLAG[*]} --yes ${wait_args[*]} ${EXTRA_ARGS[*]}
 expect {
     -re {Do you want to proceed} { send "y\r"; exp_continue }
     -re {Do you want to continue} { send "y\r"; exp_continue }
@@ -216,8 +217,15 @@ EOF
 
         echo "${output}"
 
-        if echo "${output}" | grep -qiE "Not enough stake|no stake|nothing to unstake|0\\.0+.*stake|Insufficient stake|HotKeyAccountNotExists|HotkeyAccountNotExists|hotkey.*does not exist|does not exist.*hotkey"; then
+        if echo "${output}" | grep -qiE "Not enough stake|no stake|nothing to unstake|0\\.0+.*stake|Insufficient stake|HotKeyAccountNotExists|HotkeyAccountNotExists|hotkey.*does not exist|does not exist.*hotkey|No stake to remove|Balance is 0"; then
             echo -e "${YELLOW}  Skip (no stake / account not on-chain): ${label}${RESET}"
+            return 0
+        fi
+
+        # btcli bug: UnboundLocalError when wallet-hotkey can't be loaded (e.g. hotkey
+        # was never registered or keyfile is malformed). Treat as skip — nothing to recover.
+        if echo "${output}" | grep -qiE "UnboundLocalError.*wallet|cannot access local variable.*wallet"; then
+            echo -e "${YELLOW}  Skip (btcli could not load wallet for hotkey — nothing to unstake): ${label}${RESET}"
             return 0
         fi
 
@@ -289,9 +297,9 @@ except Exception:
 
 unstake_one_hotkey() {
     local hk="$1"
-    local ss58
-    ss58="$(resolve_ss58 "$hk")"
-    run_unstake_attempt "${hk}" "--include-hotkeys ${ss58}"
+    # Pass hotkey NAME directly — btcli 9.x stake remove uses --wallet-hotkey <name>
+    # to load the hotkey from disk and sign the transaction.
+    run_unstake_attempt "${hk}" "${hk}"
 }
 
 failed=0
