@@ -247,9 +247,51 @@ EOF
     return 1
 }
 
+resolve_ss58() {
+    # Given a hotkey name, return the SS58 address.
+    # Priority:
+    #   1. Parse ss58Address from the hotkey JSON file itself
+    #   2. Read <name>pub.txt sidecar file (plain SS58 on first non-blank line)
+    #   3. Fall back to the name as-is (already an SS58 if user passed --include-hotkeys)
+    local hk_name="$1"
+    local wallet_path="${BITTENSOR_WALLET_PATH:-${HOME}/.bittensor/wallets}"
+    local hk_file="${wallet_path}/${WALLET_NAME}/hotkeys/${hk_name}"
+    local pub_file="${wallet_path}/${WALLET_NAME}/hotkeys/${hk_name}pub.txt"
+
+    # 1. Try JSON hotkey file
+    if [[ -f "$hk_file" ]]; then
+        local addr
+        addr=$(python3 -c "
+import json, sys
+try:
+    d = json.load(open('${hk_file}'))
+    print(d.get('ss58Address') or d.get('publicKey') or '')
+except Exception:
+    pass
+" 2>/dev/null)
+        if [[ -n "$addr" && "$addr" == 5* ]]; then
+            echo "$addr"; return 0
+        fi
+    fi
+
+    # 2. Try .pub.txt sidecar
+    if [[ -f "$pub_file" ]]; then
+        local addr
+        addr=$(grep -m1 '[[:alnum:]]' "$pub_file" | tr -d '[:space:]')
+        if [[ -n "$addr" ]]; then
+            echo "$addr"; return 0
+        fi
+    fi
+
+    # 3. Pass name through — caller already supplied an SS58
+    echo "$hk_name"
+}
+
 unstake_one_hotkey() {
     local hk="$1"
-    run_unstake_attempt "${hk}" "--include-hotkeys ${hk}"
+    local ss58
+    ss58="$(resolve_ss58 "$hk")"
+    run_unstake_attempt "${hk}" "--include-hotkeys ${ss58}"
 }
 
 failed=0
@@ -266,7 +308,9 @@ if [[ "$FULL_MODE" -eq 1 ]]; then
         exit 1
     fi
 
-    mapfile -t full_hotkeys < <(ls -1 "$HOTKEYS_DIR" 2>/dev/null | sort)
+    # Only include actual hotkey files; skip .pub.txt sidecars and any other
+    # non-hotkey files (btcli hotkeys are plain-name JSON files).
+    mapfile -t full_hotkeys < <(ls -1 "$HOTKEYS_DIR" 2>/dev/null | grep -v '\.txt$' | sort)
     if [[ ${#full_hotkeys[@]} -eq 0 ]]; then
         echo -e "${YELLOW}No hotkeys found in ${HOTKEYS_DIR}${RESET}"
         exit 0
