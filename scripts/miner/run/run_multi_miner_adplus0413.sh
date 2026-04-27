@@ -66,22 +66,22 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # ----------------------------------------------------------------
 MINERS=(
   # wallet-name           hotkey               port  pm2-name            model-version
-  "darnsin00 poker-miner-03281  8200  poker44_miner_20  v4_rf_mixed_large"
-  "darnsin00 poker-miner-04081  8201  poker44_miner_21  v4_rf_mixed_large"
-  "darnsin00 poker-miner-04082  8202  poker44_miner_22  v4_rf_mixed_large"
-  "darnsin00 poker-miner-04101  8203  poker44_miner_23  v4_rf_mixed_large"
-  "darnsin00 poker-miner-04102  8204  poker44_miner_24  v4_rf_mixed_large"
-  "darnsin00 poker-miner-04103  8205  poker44_miner_25  v4_rf_mixed_large"
-  "darnsin00 poker-miner-04104  8206  poker44_miner_26  v4_rf_mixed_large"
-  "darnsin00 poker-miner-04105  8207  poker44_miner_27  v4_rf_mixed_large"
-  "darnsin00 poker-miner-04111  8208  poker44_miner_28  v4_rf_mixed_large"
-  # Example: different coldkey
-  "darnsin01 poker-miner-04113  8300  poker44_miner_4113  v4_rf_mixed_large"
-  "darnsin01 poker-miner-04114  8301  poker44_miner_4114  v4_rf_mixed_large"
-  "darnsin01 poker-miner-04115  8302  poker44_miner_4115  v4_rf_mixed_large"
-  "darnsin01 poker-miner-04116  8303  poker44_miner_4116  v4_rf_mixed_large"
-  "darnsin01 poker-miner-04117  8304  poker44_miner_4117  v4_rf_mixed_large"
-  "darnsin01 poker-miner-04118  8305  poker44_miner_4118  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26001  8091  poker44_miner_1   v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26002  8092  poker44_miner_2   v4_rf_mixed"
+  "superbit-darnsin  poker-miner-26003  8093  poker44_miner_3   v4_rf_mixed"
+  "superbit-darnsin  poker-miner-26005  8095  poker44_miner_5   v4_rf_mixed"
+  "superbit-darnsin  poker-miner-26006  8096  poker44_miner_6   v4_rf_mixed"
+  "superbit-darnsin  poker-miner-26009  8099  poker44_miner_9   v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26012  8102  poker44_miner_12  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26015  8105  poker44_miner_15  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26016  8106  poker44_miner_16  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26018  8108  poker44_miner_18  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26019  8109  poker44_miner_19  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26021  8111  poker44_miner_21  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26022  8112  poker44_miner_22  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26023  8113  poker44_miner_23  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26025  8115  poker44_miner_25  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26026  8116  poker44_miner_26  v4_rf_mixed_large"
 )
 
 # ----------------------------------------------------------------
