@@ -74,14 +74,9 @@ MINERS=(
   "superbit-darnsin  poker-miner-26009  8099  poker44_miner_9   v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26012  8102  poker44_miner_12  v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26015  8105  poker44_miner_15  v4_rf_mixed_large"
-  "superbit-darnsin  poker-miner-26016  8106  poker44_miner_16  v4_rf_mixed_large"
-  "superbit-darnsin  poker-miner-26018  8108  poker44_miner_18  v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26019  8109  poker44_miner_19  v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26021  8111  poker44_miner_21  v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26022  8112  poker44_miner_22  v4_rf_mixed_large"
-  "superbit-darnsin  poker-miner-26023  8113  poker44_miner_23  v4_rf_mixed_large"
-  "superbit-darnsin  poker-miner-26025  8115  poker44_miner_25  v4_rf_mixed_large"
-  "superbit-darnsin  poker-miner-26026  8116  poker44_miner_26  v4_rf_mixed_large"
 )
 
 # ----------------------------------------------------------------
