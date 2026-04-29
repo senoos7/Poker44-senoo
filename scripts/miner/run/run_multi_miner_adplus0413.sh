@@ -66,11 +66,13 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # ----------------------------------------------------------------
 MINERS=(
   # wallet-name           hotkey               port  pm2-name            model-version
-  "superbit-darnsin  poker-miner-26001  8091  poker44_miner_1   v4_rf_mixed_large"
-  "superbit-darnsin  poker-miner-26002  8092  poker44_miner_2   v4_rf_mixed"
-  "superbit-darnsin  poker-miner-26003  8093  poker44_miner_3   v4_rf_mixed"
-  "superbit-darnsin  poker-miner-26005  8095  poker44_miner_5   v4_rf_mixed"
-  "superbit-darnsin  poker-miner-26006  8096  poker44_miner_6   v4_rf_mixed"
+  # --- v5_hgbm_enhanced A/B test (3 miners) ---
+  "superbit-darnsin  poker-miner-26001  8091  poker44_miner_1   v5_hgbm_enhanced"
+  "superbit-darnsin  poker-miner-26002  8092  poker44_miner_2   v5_hgbm_enhanced"
+  "superbit-darnsin  poker-miner-26003  8093  poker44_miner_3   v5_hgbm_enhanced"
+  # --- v4_rf_mixed_large control group (8 miners) ---
+  "superbit-darnsin  poker-miner-26005  8095  poker44_miner_5   v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26006  8096  poker44_miner_6   v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26009  8099  poker44_miner_9   v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26012  8102  poker44_miner_12  v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26015  8105  poker44_miner_15  v4_rf_mixed_large"

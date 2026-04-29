@@ -437,11 +437,21 @@ def _train_model_v3_hgbm(X: np.ndarray, y: np.ndarray):
     print("\n  Fitting final model on full dataset...")
     model.fit(X, y)
 
-    # Feature importance from HGBM (requires accessing internals of CalibratedCV)
+    # Feature importance from HGBM via permutation importance (sklearn ≥1.2 has
+    # feature_importances_ natively; older versions require permutation approach).
     top_features = []
     try:
         hgbm = model.named_steps["clf"].calibrated_classifiers_[0].estimator
-        importances = hgbm.feature_importances_
+        if hasattr(hgbm, "feature_importances_"):
+            importances = hgbm.feature_importances_
+        else:
+            # Fallback: use a small held-out sample for permutation importance
+            from sklearn.inspection import permutation_importance as _perm_imp
+            X_sample = X[:500]
+            y_sample = y[:500]
+            _pi = _perm_imp(model, X_sample, y_sample, n_repeats=5,
+                            scoring="average_precision", random_state=42, n_jobs=1)
+            importances = _pi.importances_mean
         top_idx = np.argsort(importances)[::-1][:10]
         print("\n  Top 10 features by importance:")
         for rank, idx in enumerate(top_idx, 1):
@@ -449,7 +459,7 @@ def _train_model_v3_hgbm(X: np.ndarray, y: np.ndarray):
             print(f"    {rank:>2}. {name:<35} {importances[idx]:.4f}")
             top_features.append({"rank": rank, "name": name, "importance": round(float(importances[idx]), 4)})
     except Exception as exc:
-        print(f"  (Feature importance unavailable: {exc})")
+        print(f"  (Feature importance skipped: {exc})")
 
     return model, cv_ap, cv_acc, top_features
 
@@ -479,7 +489,7 @@ def _save_metadata(
         "chunk_size_range": [_CHUNK_SIZE_MIN, _CHUNK_SIZE_MAX],
         "model_type": (
             "Pipeline(StandardScaler + CalibratedClassifierCV(HistGradientBoosting, isotonic, cv=3))"
-            if (version.startswith("v3") or "gb" in version) else
+            if (version.startswith("v3") or version.startswith("v5") or "gb" in version or "hgbm" in version) else
             "Pipeline(StandardScaler + CalibratedClassifierCV(RandomForest, isotonic, cv=3))"
         ),
         "n_features": n_features,
