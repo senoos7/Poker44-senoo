@@ -99,8 +99,7 @@ class Miner(BaseMinerNeuron):
                 ),
                 "training_data_sources": ["poker44-public-benchmark"],
                 "private_data_attestation": (
-                    "This miner does not train on validator-private human data. "
-                    "All training data is derived from the public Poker44 benchmark."
+                    "This reference miner does not train on validator-only evaluation data."
                 ),
             },
         )
