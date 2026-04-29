@@ -21,31 +21,45 @@ Version roadmap
     data: build_mixed_labeled_chunks() (same as validator, anti-shortcut filtered)
     model: RandomForest + CalibratedCV (same architecture, only data changes)
 
-  v3_gb_mixed      — Phase 2: better model + richer features (RECOMMENDED)
+  v3_gb_mixed      — Phase 2: better model + richer features
     data: build_mixed_labeled_chunks()
     model: HistGradientBoostingClassifier + 76-feature extraction
     why: HGBM handles feature interactions natively, reduces variance,
          produces better-calibrated probabilities, and is more stable across
          diverse validator batches than RF. Addresses score instability.
 
+  v5_hgbm_enhanced — Phase 3: enhanced features + HistGBM (RECOMMENDED — v1 production)
+    data: build_mixed_labeled_chunks() (anti-shortcut filtered)
+    model: HistGradientBoostingClassifier + 100-feature extraction (25 per-hand)
+    new features vs v3/v4:
+      - unique_bet_ratio: fraction of unique bet sizes (bots reuse exact sizes)
+      - preflop_raise_frac: aggression rate in preflop specifically
+      - max_amount_bb: largest single bet in the hand (all-in / overbet signal)
+      - blind_frac: fraction of 12-action window consumed by blind postings
+      - call_raise_ratio: passivity signal (calling station vs aggressor)
+      - n_actions_norm: hand length proxy (bots fold fast → short hands)
+    why: v1 uses real hands from live benchmark tables. These 6 new features
+         capture mechanical bot patterns (fixed sizing, fast folds) that
+         stand out in real gameplay more than in synthetic data.
+
 ──────────────────────────────────────────────────────────────────────
 Usage
 ──────────────────────────────────────────────────────────────────────
-  # Phase 2 — train v3 HistGBM (recommended, most stable)
+  # Phase 3 — train v5 HistGBM with enhanced features (recommended for v1)
   cd /path/to/Poker44-subnet
-  python -m poker44.miner_model.train --version v3_gb_mixed --data-source mixed
+  python -m poker44.miner_model.train --version v5_hgbm_enhanced --data-source mixed
 
   # Quick test run (fewer chunks, faster)
-  python -m poker44.miner_model.train --version v3_gb_mixed --data-source mixed --fast
+  python -m poker44.miner_model.train --version v5_hgbm_enhanced --data-source mixed --fast
 
   # Large run for best quality
-  python -m poker44.miner_model.train --version v3_gb_mixed --data-source mixed --n-chunks 4000
+  python -m poker44.miner_model.train --version v5_hgbm_enhanced --data-source mixed --n-chunks 4000
 
   # After evaluating, promote a version to the default slot
-  python -m poker44.miner_model.train --version v3_gb_mixed --data-source mixed --update-default
+  python -m poker44.miner_model.train --version v5_hgbm_enhanced --data-source mixed --update-default
 
-  # Legacy: Phase 1 RF model (60 features — needs MODEL_VERSION=v2_rf_mixed, will mismatch with new features)
-  python -m poker44.miner_model.train --version v2_rf_mixed --data-source mixed
+  # Legacy Phase 2 — v3 HistGBM (76 features — will mismatch with new features.py)
+  # python -m poker44.miner_model.train --version v3_gb_mixed --data-source mixed
 """
 
 from __future__ import annotations
@@ -290,7 +304,7 @@ def build_training_matrix(
 
 def train_model(X: np.ndarray, y: np.ndarray, version: str = "") -> Any:
     """Dispatch to the appropriate model architecture based on version name."""
-    if version.startswith("v3") or "gb" in version:
+    if version.startswith("v3") or version.startswith("v5") or "gb" in version or "hgbm" in version:
         return _train_model_v3_hgbm(X, y)
     return _train_model_v2_rf(X, y)
 

@@ -10,7 +10,7 @@ Works on the REAL sanitized hand format from poker44/validator/sanitization.py:
   - streets: [] (community cards stripped)
   - metadata: normalized to constants (sb=0.01, bb=0.02)
 
-Per-hand feature vector (19 features):
+Per-hand feature vector (25 features):
   preflop_frac, flop_frac, turn_frac, river_frac,   [street distribution]
   depth,                                             [postflop depth 0-1]
   fold_frac, call_frac, raise_frac, check_frac,      [action type fracs]
@@ -21,14 +21,22 @@ Per-hand feature vector (19 features):
   bet_cv,                                            [std/mean of bet sizes]
   went_to_river,                                     [1.0 if river seen]
   street_entropy,                                    [entropy of street dist]
+  unique_bet_ratio,                                  [unique bet sizes / non-zero bets — bots reuse sizes]
+  preflop_raise_frac,                                [raises as fraction of preflop actions only]
+  max_amount_bb,                                     [max single bet in BB, capped at 50]
+  blind_frac,                                        [fraction of actions that are just blinds]
+  call_raise_ratio,                                  [calls / raises — passivity signal]
+  n_actions_norm,                                    [total actions / window (12) — hand length proxy]
 
-Chunk-level feature vector (76 features):
-  mean, std, p25, p75 of the per-hand vector across all hands in the chunk.
+Chunk-level feature vector (100 features):
+  mean, std, p25, p75 of the 25 per-hand features across all hands in the chunk.
 
-Key discriminator: bots play with LOW within-chunk variance (systematic profiles)
-while human chunks are diverse — high variance in bet sizes, street depth, etc.
-Bots also show lower street_entropy (more uniform street patterns) and lower
-bet_cv (more mechanical bet sizing) than humans.
+Key discriminators:
+  - LOW within-chunk variance → systematic bot profiles
+  - LOW unique_bet_ratio → mechanical bet sizing (always 2BB, 3BB, etc.)
+  - LOW street_entropy → bots concentrate on fewer streets (more preflop folds)
+  - HIGH blind_frac → bots fold fast, window dominated by blind postings
+  - LOW bet_cv → mechanical, non-adaptive sizing
 """
 
 from __future__ import annotations
@@ -40,12 +48,13 @@ import numpy as np
 
 _MINER_ACTION_WINDOW = 12
 _POST_FLOP_STREETS = {"flop", "turn", "river"}
-_N_HAND_FEATURES = 19
+_N_HAND_FEATURES = 25
 
 _RAISE_TYPES = {"raise", "bet", "all_in"}
 _CALL_TYPES  = {"call"}
 _CHECK_TYPES = {"check"}
 _FOLD_TYPES  = {"fold"}
+_BLIND_TYPES = {"small_blind", "big_blind", "ante"}
 
 _LOG4 = float(np.log(4.0))   # max possible street entropy denominator
 
@@ -128,6 +137,43 @@ def extract_hand_features(hand: Dict[str, Any]) -> np.ndarray:
     raw_entropy = -sum(f * float(np.log(f + 1e-9)) for f in fracs)
     street_entropy = float(np.clip(raw_entropy / _LOG4, 0.0, 1.0))
 
+    # --- Bet size diversity: unique non-zero bet sizes / total non-zero bets ---
+    # Bots reuse exact bet sizes mechanically (e.g. always 2.0 BB) → low ratio.
+    # Humans vary freely → high ratio.
+    non_zero_amounts = [_safe_float(a.get("normalized_amount_bb")) for a in actions
+                        if _safe_float(a.get("normalized_amount_bb")) > 0.0]
+    if non_zero_amounts:
+        unique_bets = len(set(round(x, 2) for x in non_zero_amounts))
+        unique_bet_ratio = unique_bets / len(non_zero_amounts)
+    else:
+        unique_bet_ratio = 0.0
+
+    # --- Preflop raise fraction: raises / preflop_actions (preflop aggression) ---
+    preflop_actions = [a for a in actions if _safe_str(a.get("street", "")) == "preflop"]
+    pf_raise_count = sum(1 for a in preflop_actions
+                         if _safe_str(a.get("action_type", "")) in _RAISE_TYPES)
+    preflop_raise_frac = pf_raise_count / max(len(preflop_actions), 1)
+
+    # --- Max single bet size (capped at 50 BB) ---
+    max_amount_bb = min(max(non_zero_amounts, default=0.0), 50.0)
+
+    # --- Blind fraction: how much of the action window is just blind/ante postings ---
+    # Bots that fold early have a high fraction of blinds in their 12-action window.
+    blind_count = sum(1 for a in actions
+                      if _safe_str(a.get("action_type", "")) in _BLIND_TYPES)
+    blind_frac = blind_count / total_slots
+
+    # --- Call-to-raise ratio: passivity signal (high = passive, calling station) ---
+    call_raise_ratio = min(
+        (type_counts.get("call", 0)) / max(
+            sum(type_counts.get(t, 0) for t in _RAISE_TYPES), 1
+        ),
+        5.0,
+    )
+
+    # --- Normalized action count: total actions / window size ---
+    n_actions_norm = len(actions) / _MINER_ACTION_WINDOW
+
     return np.array(
         [
             preflop_frac, flop_frac, turn_frac, river_frac,
@@ -140,6 +186,12 @@ def extract_hand_features(hand: Dict[str, Any]) -> np.ndarray:
             bet_cv,
             went_to_river,
             street_entropy,
+            unique_bet_ratio,
+            preflop_raise_frac,
+            max_amount_bb,
+            blind_frac,
+            call_raise_ratio,
+            n_actions_norm,
         ],
         dtype=np.float32,
     )
@@ -177,7 +229,17 @@ _FEAT_NAMES = [
     "bet_cv",
     "went_to_river",
     "street_entropy",
+    "unique_bet_ratio",
+    "preflop_raise_frac",
+    "max_amount_bb",
+    "blind_frac",
+    "call_raise_ratio",
+    "n_actions_norm",
 ]
+
+assert len(_FEAT_NAMES) == _N_HAND_FEATURES, (
+    f"_FEAT_NAMES has {len(_FEAT_NAMES)} entries but _N_HAND_FEATURES={_N_HAND_FEATURES}"
+)
 
 CHUNK_FEATURE_NAMES: List[str] = [
     f"{stat}_{feat}"
