@@ -1,7 +1,7 @@
 """
 Feature extraction for Poker44 bot detection.
 
-Works on the REAL sanitized hand format from poker44/validator/sanitization.py:
+Works on the REAL sanitized hand format from poker44/validator/payload_view.py:
   - actions: exactly 12 sampled slots, each with:
       street, action_type, normalized_amount_bb, pot_before, pot_after,
       actor_seat, amount, raise_to, call_to
