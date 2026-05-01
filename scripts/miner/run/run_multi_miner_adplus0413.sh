@@ -92,6 +92,9 @@ MINERS=(
   "superbit-darnsin  poker-miner-26012  8102  poker44_miner_12  v5_hgbm_enhanced"
   "superbit-darnsin  poker-miner-26015  8105  poker44_miner_15  v5_hgbm_enhanced"
   "superbit-darnsin  poker-miner-26021  8111  poker44_miner_21  v5_hgbm_enhanced"
+  "superbit-darnsin  poker-miner-26004  8094  poker44_miner_22  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26005  8095  poker44_miner_25  v4_rf_mixed_large"
+  "superbit-darnsin  poker-miner-26006  8096  poker44_miner_26  v4_rf_mixed_large"
 )
 
 # ----------------------------------------------------------------
