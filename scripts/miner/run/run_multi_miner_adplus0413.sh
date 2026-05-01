@@ -39,6 +39,14 @@ PYTHON="${PYTHON:-$(which python3)}"
 # Default model version — used when a miner entry has no 5th field or "-"
 DEFAULT_MODEL_VERSION="${DEFAULT_MODEL_VERSION:-v4_rf_mixed}"
 
+# Public IP of this VPS — required when the machine has a private internal IP
+# (e.g. cloud/VPS environments where eth0 shows 10.x / 172.x / 192.168.x).
+# Without this, the miner registers the private IP on-chain and validators
+# cannot reach the axon → zero queries.
+# Override: AXON_EXTERNAL_IP=1.2.3.4 ./run_multi_miner.sh start
+# Leave empty to let bittensor auto-detect (only reliable if eth0 = public IP).
+AXON_EXTERNAL_IP="${AXON_EXTERNAL_IP:-}"
+
 # Your fork URL — used in the open-source manifest so the validator marks
 # this miner as "transparent" (not "opaque").
 # Must NOT be the reference repo (https://github.com/Poker44/Poker44-subnet)
@@ -71,14 +79,14 @@ MINERS=(
   "superbit-darnsin  poker-miner-26002  8092  poker44_miner_2   v5_hgbm_enhanced"
   "superbit-darnsin  poker-miner-26003  8093  poker44_miner_3   v5_hgbm_enhanced"
   # --- v4_rf_mixed_large control group (8 miners) ---
-  "superbit-darnsin  poker-miner-26005  8095  poker44_miner_5   v4_rf_mixed_large"
-  "superbit-darnsin  poker-miner-26006  8096  poker44_miner_6   v4_rf_mixed_large"
+  # "superbit-darnsin  poker-miner-26005  8095  poker44_miner_5   v4_rf_mixed_large"
+  # "superbit-darnsin  poker-miner-26006  8096  poker44_miner_6   v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26009  8099  poker44_miner_9   v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26012  8102  poker44_miner_12  v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26015  8105  poker44_miner_15  v4_rf_mixed_large"
-  "superbit-darnsin  poker-miner-26019  8109  poker44_miner_19  v4_rf_mixed_large"
+  # "superbit-darnsin  poker-miner-26019  8109  poker44_miner_19  v4_rf_mixed_large"
   "superbit-darnsin  poker-miner-26021  8111  poker44_miner_21  v4_rf_mixed_large"
-  "superbit-darnsin  poker-miner-26022  8112  poker44_miner_22  v4_rf_mixed_large"
+  # "superbit-darnsin  poker-miner-26022  8112  poker44_miner_22  v4_rf_mixed_large"
 )
 
 # ----------------------------------------------------------------
@@ -116,6 +124,12 @@ miner_args() {
   local port="$3"
   local args="--netuid $NETUID --wallet.name $wallet --wallet.hotkey $hotkey \
         --subtensor.network $NETWORK --axon.port $port --logging.debug"
+
+  # Advertise the correct public IP so validators can reach the axon.
+  # Critical on VPS/cloud where the NIC shows a private (NAT'd) IP.
+  if [ -n "$AXON_EXTERNAL_IP" ]; then
+    args="$args --axon.external_ip $AXON_EXTERNAL_IP"
+  fi
 
   if [ -n "$ALLOWED_VALIDATOR_HOTKEYS" ]; then
     # shellcheck disable=SC2206
