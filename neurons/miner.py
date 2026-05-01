@@ -1,11 +1,12 @@
-"""Poker44 miner — ML-based bot detector with heuristic fallback."""
+"""Poker44 miner — ML bot detector blended with reference behavioral heuristic."""
 
 import json
 import os
 import subprocess
 import time
+from collections import Counter
 from pathlib import Path
-from typing import Tuple
+from typing import List, Tuple
 
 import bittensor as bt
 
@@ -77,9 +78,9 @@ class Miner(BaseMinerNeuron):
                 repo_root / "poker44" / "miner_model" / "sanitize.py",        # sanitization wrapper
             ],
             defaults={
-                "model_name": "poker44-rf-bot-detector",
+                "model_name": "poker44-ml-heuristic",
                 "model_version": _model_version,
-                "framework": "scikit-learn",
+                "framework": "scikit-learn+heuristic",
                 "license": "MIT",
                 # ⚠️  Must point to YOUR OWN fork/repo, NOT the reference subnet repo.
                 # Using the reference repo URL (Poker44/Poker44-subnet) with a custom
@@ -178,10 +179,12 @@ class Miner(BaseMinerNeuron):
             # stays responsive (handles cancellation, heartbeats, other tasks).
             # Without this, HistGBM inference blocks the entire event loop and the
             # validator's timeout fires before the response is sent back.
-            scores = await loop.run_in_executor(
+            ml_scores = await loop.run_in_executor(
                 None,
                 lambda: [self._detector.score_chunk(chunk) for chunk in chunks],
             )
+            heuristic_scores = [self._score_chunk_heuristic(chunk) for chunk in chunks]
+            scores = [self._blend(ml, h) for ml, h in zip(ml_scores, heuristic_scores)]
             synapse.risk_scores = scores
             predictions = [score >= 0.5 for score in scores]
             synapse.predictions = predictions
@@ -207,7 +210,8 @@ class Miner(BaseMinerNeuron):
         # --- INFO: response summary ---
         bt.logging.info(
             f"[RESPONSE] chunks={len(chunks)} | predicted_bot={n_bot} | predicted_human={n_human} | "
-            f"scores={[round(s, 3) for s in scores]}"
+            f"ml_scores={[round(s, 3) for s in ml_scores]} | "
+            f"blended={[round(s, 3) for s in scores]}"
         )
 
         # --- DEBUG: full per-chunk detail ---
@@ -217,6 +221,62 @@ class Miner(BaseMinerNeuron):
             )
 
         return synapse
+
+    # ------------------------------------------------------------------
+    # Reference behavioral heuristic (from Poker44 v1 baseline)
+    # Gets ~0.53 composite on its own. Used to floor/blend with ML scores
+    # so we always produce a useful ranking even when ML is uncertain.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _clamp01(v: float) -> float:
+        return max(0.0, min(1.0, v))
+
+    @classmethod
+    def _score_hand_heuristic(cls, hand: dict) -> float:
+        actions = hand.get("actions") or []
+        players = hand.get("players") or []
+        streets = hand.get("streets") or []
+        outcome = hand.get("outcome") or {}
+
+        action_counts = Counter(a.get("action_type") for a in actions)
+        meaningful = max(1, sum(
+            action_counts.get(k, 0)
+            for k in ("call", "check", "bet", "raise", "fold")
+        ))
+
+        call_ratio  = action_counts.get("call",  0) / meaningful
+        check_ratio = action_counts.get("check", 0) / meaningful
+        fold_ratio  = action_counts.get("fold",  0) / meaningful
+        raise_ratio = action_counts.get("raise", 0) / meaningful
+        street_depth    = len(streets) / 3.0
+        showdown_flag   = 1.0 if outcome.get("showdown") else 0.0
+        player_signal   = (6 - min(len(players), 6)) / 4.0 if players else 0.0
+
+        s = (0.32 * street_depth
+             + 0.22 * showdown_flag
+             + 0.18 * cls._clamp01(call_ratio  / 0.35)
+             + 0.12 * cls._clamp01(check_ratio / 0.30)
+             + 0.08 * player_signal
+             - 0.18 * cls._clamp01(fold_ratio  / 0.55)
+             - 0.10 * cls._clamp01(raise_ratio / 0.20))
+        return cls._clamp01(s)
+
+    @classmethod
+    def _score_chunk_heuristic(cls, chunk: List[dict]) -> float:
+        if not chunk:
+            return 0.5
+        scores = [cls._score_hand_heuristic(h) for h in chunk]
+        return round(sum(scores) / len(scores), 6)
+
+    @classmethod
+    def _blend(cls, ml: float, heuristic: float, ml_weight: float = 0.6) -> float:
+        """Weighted blend of ML and heuristic scores.
+
+        ml_weight=0.6 means ML drives 60% of the final score; the heuristic
+        provides a 40% floor so we always produce meaningful rankings even
+        when the ML model is uncertain on unseen real-world data.
+        """
+        return round(cls._clamp01(ml_weight * ml + (1.0 - ml_weight) * heuristic), 6)
 
     async def blacklist(self, synapse: DetectionSynapse) -> Tuple[bool, str]:
         incoming = (synapse.dendrite.hotkey if synapse.dendrite else "unknown")
