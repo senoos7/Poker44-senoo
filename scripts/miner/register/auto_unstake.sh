@@ -60,6 +60,7 @@ RETRY_BASE_DELAY_SECS=24
 MAX_RETRIES=8
 ALPHA_ONLY=0
 WAIT_FINALIZATION=0
+SKIP_STAKE_FILTER=0
 EXTRA_ARGS=()
 
 BTCLI_BIN="${BTCLI_BIN:-btcli}"
@@ -67,6 +68,7 @@ BTCLI_BIN="${BTCLI_BIN:-btcli}"
 # ── Argument parsing ─────────────────────────────────────────
 usage() {
     echo "Usage: $0 --wallet <coldkey> --netuid <n> (--full | --hotkey <name> | --hotkeys-file <path> | --include-hotkeys hk1,hk2,...)"
+    echo "  --skip-stake-filter   (--full only) skip btcli stake list pre-check; process all hotkeys"
     echo "See script header for full options."
     exit 1
 }
@@ -87,6 +89,7 @@ while [[ $# -gt 0 ]]; do
         --alpha-only) ALPHA_ONLY=1; shift 1 ;;
         --wait-finalization) WAIT_FINALIZATION=1; shift 1 ;;
         --no-wait-finalization) WAIT_FINALIZATION=0; shift 1 ;;
+        --skip-stake-filter) SKIP_STAKE_FILTER=1; shift 1 ;;
         --extra-args)
             # shellcheck disable=SC2206
             EXTRA_ARGS=($2)
@@ -162,6 +165,11 @@ echo -e "  netuid      : ${NETUID}"
 echo -e "  network     : ${NETWORK}"
 if [[ "$FULL_MODE" -eq 1 ]]; then
     echo -e "  mode        : ${BOLD}full${RESET} (per-hotkey from ~/.bittensor/wallets/${WALLET_NAME}/hotkeys/)"
+    if [[ "$SKIP_STAKE_FILTER" -eq 0 ]]; then
+        echo -e "  stake filter: ${GREEN}ON${RESET} (pre-screens via 'btcli stake list'; only staked hotkeys are processed)"
+    else
+        echo -e "  stake filter: ${YELLOW}OFF${RESET} (--skip-stake-filter; all hotkeys will be attempted)"
+    fi
 else
     echo -e "  hotkeys     : ${#hotkeys_list[@]}"
 fi
@@ -295,6 +303,79 @@ except Exception:
     echo "$hk_name"
 }
 
+# filter_staked_hotkeys <hk1> <hk2> ...
+# Runs `btcli stake list` once, then prints (to stdout) only those hotkey names
+# from the provided list that have non-zero stake.  Falls back to all hotkeys if
+# the query fails so the caller can still proceed safely.
+filter_staked_hotkeys() {
+    local all_hks=("$@")
+    local tmp
+    tmp=$(mktemp /tmp/stake_list_XXXXXX.txt)
+
+    echo -e "${CYAN}  Pre-screening: running 'btcli stake list' for '${WALLET_NAME}' on ${NETWORK}...${RESET}" >&2
+
+    set +e
+    expect <<EOF > "$tmp" 2>/dev/null
+log_user 1
+set timeout 180
+spawn ${BTCLI_BIN} stake list --wallet.name ${WALLET_NAME} --subtensor.network ${NETWORK}
+expect {
+    -re {Enter your password} { send "\$env(AUTOUNSTAKE_PW)\r"; exp_continue }
+    -re {Decrypting}          { exp_continue }
+    timeout { exit 3 }
+    eof
+}
+EOF
+    local rc=$?
+    set -e
+
+    if [[ $rc -ne 0 ]] || [[ ! -s "$tmp" ]]; then
+        echo -e "${YELLOW}  stake list query failed (rc=${rc}); will process all ${#all_hks[@]} hotkeys.${RESET}" >&2
+        rm -f "$tmp"
+        printf '%s\n' "${all_hks[@]}"
+        return
+    fi
+
+    # Parse with Python: strip ANSI codes, then check which known hotkeys
+    # appear on a line that also contains a non-zero τ or α amount.
+    # Works with both classic and Rich/DTAO table output.
+    local known_json
+    known_json=$(python3 -c "import json,sys; print(json.dumps(sys.argv[1:]))" "${all_hks[@]}")
+
+    python3 - "$tmp" "$known_json" <<'PYEOF'
+import re, sys, json
+
+stake_file  = sys.argv[1]
+known_hotkeys = json.loads(sys.argv[2])
+
+with open(stake_file) as f:
+    raw = f.read()
+
+# Strip ANSI / terminal escape codes
+clean = re.sub(r'\x1b\[[0-9;]*m', '', raw)
+
+staked = []
+for hk in known_hotkeys:
+    for line in clean.splitlines():
+        if hk not in line:
+            continue
+        # A line contains this hotkey. Look for a positive stake amount
+        # (τ1.234, α 0.567, or a bare decimal like 1.234000 in the same field).
+        amounts = re.findall(r'[τα]\s*([\d]+\.[\d]+)', line)
+        if not amounts:
+            # Fallback: bare decimals with ≥4 decimal places (stake columns)
+            amounts = re.findall(r'\b([\d]+\.[\d]{4,})\b', line)
+        if any(float(a) > 0.0001 for a in amounts):
+            staked.append(hk)
+        break  # done with this hotkey regardless
+
+for hk in staked:
+    print(hk)
+PYEOF
+
+    rm -f "$tmp"
+}
+
 unstake_one_hotkey() {
     local hk="$1"
     # Pass hotkey NAME directly — btcli 9.x stake remove uses --wallet-hotkey <name>
@@ -324,17 +405,34 @@ if [[ "$FULL_MODE" -eq 1 ]]; then
         exit 0
     fi
 
-    echo -e "${CYAN}Found ${#full_hotkeys[@]} hotkey(s) in wallet '${WALLET_NAME}': ${full_hotkeys[*]}${RESET}"
+    echo -e "${CYAN}Found ${#full_hotkeys[@]} hotkey(s) in wallet '${WALLET_NAME}'.${RESET}"
+
+    # ── Stake pre-screen ──────────────────────────────────────────────────
+    # Query btcli stake list once and keep only hotkeys with non-zero stake.
+    # This avoids wasting time (and chain calls) on deregistered / empty hotkeys.
+    # Pass --skip-stake-filter to bypass this check.
+    if [[ "$SKIP_STAKE_FILTER" -eq 0 ]]; then
+        mapfile -t hotkeys_to_process < <(filter_staked_hotkeys "${full_hotkeys[@]}")
+        if [[ ${#hotkeys_to_process[@]} -eq 0 ]]; then
+            echo -e "${YELLOW}No hotkeys with stake found for wallet '${WALLET_NAME}' — nothing to unstake.${RESET}"
+            exit 0
+        fi
+        echo -e "${GREEN}  ${#hotkeys_to_process[@]} hotkey(s) have stake → will unstake: ${hotkeys_to_process[*]}${RESET}"
+        echo -e "${YELLOW}  Skipping ${#full_hotkeys[@]} total - ${#hotkeys_to_process[@]} staked = $((${#full_hotkeys[@]} - ${#hotkeys_to_process[@]})) hotkeys with no stake.${RESET}"
+    else
+        hotkeys_to_process=("${full_hotkeys[@]}")
+        echo -e "${YELLOW}  --skip-stake-filter set: processing all ${#hotkeys_to_process[@]} hotkeys.${RESET}"
+    fi
     echo ""
 
     idx=0
-    for hk in "${full_hotkeys[@]}"; do
+    for hk in "${hotkeys_to_process[@]}"; do
         idx=$((idx + 1))
-        echo -e "${BOLD}[${idx}/${#full_hotkeys[@]}] Processing: ${hk}${RESET}"
+        echo -e "${BOLD}[${idx}/${#hotkeys_to_process[@]}] Processing: ${hk}${RESET}"
         if ! unstake_one_hotkey "$hk"; then
             failed=$((failed + 1))
         fi
-        if [[ $idx -lt ${#full_hotkeys[@]} ]]; then
+        if [[ $idx -lt ${#hotkeys_to_process[@]} ]]; then
             sleep "$DELAY_AFTER_OK_SECS"
         fi
     done
