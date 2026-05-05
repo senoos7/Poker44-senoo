@@ -28,38 +28,36 @@ Version roadmap
          produces better-calibrated probabilities, and is more stable across
          diverse validator batches than RF. Addresses score instability.
 
-  v5_hgbm_enhanced — Phase 3: enhanced features + HistGBM (RECOMMENDED — v1 production)
+  v5_hgbm_enhanced — Phase 3: enhanced features + HistGBM
     data: build_mixed_labeled_chunks() (anti-shortcut filtered)
     model: HistGradientBoostingClassifier + 100-feature extraction (25 per-hand)
     new features vs v3/v4:
-      - unique_bet_ratio: fraction of unique bet sizes (bots reuse exact sizes)
-      - preflop_raise_frac: aggression rate in preflop specifically
-      - max_amount_bb: largest single bet in the hand (all-in / overbet signal)
-      - blind_frac: fraction of 12-action window consumed by blind postings
-      - call_raise_ratio: passivity signal (calling station vs aggressor)
-      - n_actions_norm: hand length proxy (bots fold fast → short hands)
-    why: v1 uses real hands from live benchmark tables. These 6 new features
-         capture mechanical bot patterns (fixed sizing, fast folds) that
-         stand out in real gameplay more than in synthetic data.
+      - unique_bet_ratio, preflop_raise_frac, max_amount_bb, blind_frac,
+        call_raise_ratio, n_actions_norm
+    why: v1 uses real hands from live benchmark tables. Trained on synthetic
+         data, so CV=1.0 is meaningless — high sim-to-real gap expected.
+
+  v6_benchmark — Phase 4: real evaluation data (RECOMMENDED — use this)
+    data: public benchmark API (https://api.poker44.net/api/v1/benchmark)
+          real labeled chunks from live v1 evaluation, already in miner-visible
+          format. No synthetic generation needed.
+    model: HistGradientBoostingClassifier + 100-feature extraction (same as v5)
+    why: eliminates the sim-to-real gap entirely. CV scores reflect actual
+         competition performance. This is the path to escaping Rank 100+.
+    download first: python scripts/download_benchmark.py
 
 ──────────────────────────────────────────────────────────────────────
 Usage
 ──────────────────────────────────────────────────────────────────────
-  # Phase 3 — train v5 HistGBM with enhanced features (recommended for v1)
-  cd /path/to/Poker44-subnet
-  python -m poker44.miner_model.train --version v5_hgbm_enhanced --data-source mixed
+  # Phase 4 — train on real benchmark data (RECOMMENDED)
+  python scripts/download_benchmark.py           # download once
+  python -m poker44.miner_model.train --version v6_benchmark --data-source benchmark
 
-  # Quick test run (fewer chunks, faster)
-  python -m poker44.miner_model.train --version v5_hgbm_enhanced --data-source mixed --fast
-
-  # Large run for best quality
+  # Phase 3 — train v5 HistGBM with enhanced features (synthetic fallback)
   python -m poker44.miner_model.train --version v5_hgbm_enhanced --data-source mixed --n-chunks 4000
 
   # After evaluating, promote a version to the default slot
-  python -m poker44.miner_model.train --version v5_hgbm_enhanced --data-source mixed --update-default
-
-  # Legacy Phase 2 — v3 HistGBM (76 features — will mismatch with new features.py)
-  # python -m poker44.miner_model.train --version v3_gb_mixed --data-source mixed
+  python -m poker44.miner_model.train --version v6_benchmark --update-default
 """
 
 from __future__ import annotations
@@ -287,6 +285,51 @@ def _apply_sanitization(chunks: List[List[Dict]]) -> List[List[Dict]]:
     return [[sanitize_hand(h) for h in chunk] for chunk in chunks]
 
 
+_DEFAULT_BENCHMARK_PATH = Path(__file__).resolve().parents[2] / "data" / "benchmark.json.gz"
+
+
+def _load_benchmark_data(
+    benchmark_path: Optional[Path] = None,
+    rng: Optional[np.random.Generator] = None,
+) -> Tuple[List[List[Dict]], List[List[Dict]]]:
+    """Load real labeled chunks from the downloaded benchmark file.
+
+    Returns (bot_chunks, human_chunks). Benchmark chunks are already in
+    miner-visible format (no further sanitization required).
+    """
+    path = Path(benchmark_path or _DEFAULT_BENCHMARK_PATH)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Benchmark file not found: {path}\n"
+            f"Download it first:\n"
+            f"  python scripts/download_benchmark.py --out {path}"
+        )
+
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt") as f:
+        data = json.load(f)
+
+    chunks_raw = data["chunks"]
+    labels = data["groundTruth"]
+
+    if len(chunks_raw) != len(labels):
+        raise ValueError(f"chunks/labels length mismatch: {len(chunks_raw)} vs {len(labels)}")
+
+    bot_chunks   = [c for c, lbl in zip(chunks_raw, labels) if lbl == 1]
+    human_chunks = [c for c, lbl in zip(chunks_raw, labels) if lbl == 0]
+
+    meta = data.get("meta", {})
+    print(f"  Benchmark: {len(bot_chunks)} bot + {len(human_chunks)} human chunks "
+          f"| {meta.get('total_hands', '?'):,} hands "
+          f"| dates={meta.get('dates', '?')}")
+
+    if rng is not None:
+        rng.shuffle(bot_chunks)
+        rng.shuffle(human_chunks)
+
+    return bot_chunks, human_chunks
+
+
 def build_training_matrix(
     bot_chunks: List[List[Dict]],
     human_chunks: List[List[Dict]],
@@ -304,7 +347,7 @@ def build_training_matrix(
 
 def train_model(X: np.ndarray, y: np.ndarray, version: str = "") -> Any:
     """Dispatch to the appropriate model architecture based on version name."""
-    if version.startswith("v3") or version.startswith("v5") or "gb" in version or "hgbm" in version:
+    if _is_hgbm_version(version):
         return _train_model_v3_hgbm(X, y)
     return _train_model_v2_rf(X, y)
 
@@ -478,18 +521,22 @@ def _save_metadata(
     top_features: list,
     training_seconds: float,
     n_features: int,
+    n_bot_chunks: Optional[int] = None,
+    n_human_chunks: Optional[int] = None,
 ) -> None:
+    _n_bot   = n_bot_chunks   if n_bot_chunks   is not None else n_per_class
+    _n_human = n_human_chunks if n_human_chunks is not None else n_per_class
     meta = {
         "version": version,
         "trained_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "data_source": data_source,
-        "n_chunks": n_per_class * 2,
-        "n_bot_chunks": n_per_class,
-        "n_human_chunks": n_per_class,
+        "n_chunks": _n_bot + _n_human,
+        "n_bot_chunks": _n_bot,
+        "n_human_chunks": _n_human,
         "chunk_size_range": [_CHUNK_SIZE_MIN, _CHUNK_SIZE_MAX],
         "model_type": (
             "Pipeline(StandardScaler + CalibratedClassifierCV(HistGradientBoosting, isotonic, cv=3))"
-            if (version.startswith("v3") or version.startswith("v5") or "gb" in version or "hgbm" in version) else
+            if _is_hgbm_version(version) else
             "Pipeline(StandardScaler + CalibratedClassifierCV(RandomForest, isotonic, cv=3))"
         ),
         "n_features": n_features,
@@ -546,6 +593,12 @@ def _print_comparison_hint(version_dir: Path) -> None:
 # Main
 # ------------------------------------------------------------------
 
+def _is_hgbm_version(version: str) -> bool:
+    return (version.startswith("v3") or version.startswith("v5")
+            or version.startswith("v6") or "gb" in version or "hgbm" in version
+            or "benchmark" in version)
+
+
 def main(
     version: str,
     data_source: str,
@@ -554,9 +607,11 @@ def main(
     update_default: bool,
     seed: int,
     fast: bool,
+    benchmark_path: Optional[Path] = None,
 ) -> None:
     n_per_class = n_chunks // 2
     rng = random.Random(seed)
+    np_rng = np.random.default_rng(seed)
     t0 = time.time()
 
     version_dir = _MODELS_ROOT / version
@@ -566,31 +621,42 @@ def main(
     print("=" * 60)
     print(f"Poker44 BotDetector — training  [{version}]")
     print(f"  data source      : {data_source}")
-    print(f"  chunks per class : {n_per_class}")
-    print(f"  chunk size range : {_CHUNK_SIZE_MIN}–{_CHUNK_SIZE_MAX} hands")
-    print(f"  human corpus     : {human_corpus}")
+    if data_source == "benchmark":
+        bpath = benchmark_path or _DEFAULT_BENCHMARK_PATH
+        print(f"  benchmark file   : {bpath}")
+    else:
+        print(f"  chunks per class : {n_per_class}")
+        print(f"  chunk size range : {_CHUNK_SIZE_MIN}–{_CHUNK_SIZE_MAX} hands")
+        print(f"  human corpus     : {human_corpus}")
     print(f"  output           : {output_path}")
     print(f"  update default   : {update_default}")
     print("=" * 60)
 
-    # ---- Step 1: generate raw data ----
-    if data_source == "mixed":
+    # ---- Step 1: load / generate data ----
+    if data_source == "benchmark":
+        print("\n[A] Loading real labeled chunks from benchmark API download...")
+        bot_chunks, human_chunks = _load_benchmark_data(benchmark_path, rng=np_rng)
+        print(f"  Using ALL available benchmark chunks (no synthetic generation)")
+    elif data_source == "mixed":
         bot_chunks_raw, human_chunks_raw = _generate_mixed_data(
             n_per_class, human_corpus, rng, fast=fast
         )
+        # ---- Step 2 (synthetic only): sanitize ----
+        print("\n[SANITIZE] Applying validator sanitization to all chunks...")
+        bot_chunks   = _apply_sanitization(bot_chunks_raw)
+        human_chunks = _apply_sanitization(human_chunks_raw)
+        print(f"  Sanitized {len(bot_chunks)} bot + {len(human_chunks)} human chunks")
     else:
         bot_chunks_raw, human_chunks_raw = _generate_synthetic_data(
             n_per_class, human_corpus, rng
         )
-
-    # ---- Step 2: sanitize ----
-    print("\n[SANITIZE] Applying validator sanitization to all chunks...")
-    bot_chunks   = _apply_sanitization(bot_chunks_raw)
-    human_chunks = _apply_sanitization(human_chunks_raw)
-    print(f"  Sanitized {len(bot_chunks)} bot + {len(human_chunks)} human chunks")
+        print("\n[SANITIZE] Applying validator sanitization to all chunks...")
+        bot_chunks   = _apply_sanitization(bot_chunks_raw)
+        human_chunks = _apply_sanitization(human_chunks_raw)
+        print(f"  Sanitized {len(bot_chunks)} bot + {len(human_chunks)} human chunks")
 
     # ---- Step 3: features + train ----
-    arch = "HistGBM" if (version.startswith("v3") or "gb" in version) else "RandomForest"
+    arch = "HistGBM" if _is_hgbm_version(version) else "RandomForest"
     print(f"\n[TRAIN] Building feature matrix + training {arch}...")
     X, y = build_training_matrix(bot_chunks, human_chunks)
     model, cv_ap, cv_acc, top_features = train_model(X, y, version=version)
@@ -607,12 +673,14 @@ def main(
         path=version_dir / "metadata.json",
         version=version,
         data_source=data_source,
-        n_per_class=len(bot_chunks),
+        n_per_class=min(len(bot_chunks), len(human_chunks)),
         cv_ap=cv_ap,
         cv_acc=cv_acc,
         top_features=top_features,
         training_seconds=training_seconds,
         n_features=X.shape[1],
+        n_bot_chunks=len(bot_chunks),
+        n_human_chunks=len(human_chunks),
     )
 
     # ---- Step 6: optionally update default slot ----
@@ -644,11 +712,20 @@ def _parse_args() -> argparse.Namespace:
         help="Model version name, saved to models/<version>/  (default: v3_gb_mixed)",
     )
     p.add_argument(
-        "--data-source", choices=["synthetic", "mixed"], default="mixed",
+        "--data-source", choices=["synthetic", "mixed", "benchmark"], default="mixed",
         help=(
-            "synthetic: custom bot profiles, no anti-shortcut filter (old approach). "
-            "mixed: uses build_mixed_labeled_chunks() like the validator (Phase 1 upgrade). "
+            "benchmark: use real labeled chunks from the public benchmark API (RECOMMENDED). "
+            "mixed: uses build_mixed_labeled_chunks() like the validator (synthetic). "
+            "synthetic: custom bot profiles, no anti-shortcut filter (legacy). "
             "Default: mixed"
+        ),
+    )
+    p.add_argument(
+        "--benchmark-path", type=Path, default=None,
+        help=(
+            f"Path to downloaded benchmark JSON.GZ file "
+            f"(default: {_DEFAULT_BENCHMARK_PATH}). "
+            "Download with: python scripts/download_benchmark.py"
         ),
     )
     p.add_argument(
@@ -681,5 +758,6 @@ if __name__ == "__main__":
         human_corpus=args.human_corpus,
         update_default=args.update_default,
         seed=args.seed,
+        benchmark_path=getattr(args, "benchmark_path", None),
         fast=args.fast,
     )

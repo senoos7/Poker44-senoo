@@ -37,10 +37,11 @@ MINER_SCRIPT="./neurons/miner.py"
 PYTHON="${PYTHON:-$(which python3)}"
 
 # Default model version — used when a miner entry has no 5th field or "-"
-# v5_hgbm_enhanced is the only model compatible with the current 100-feature
-# features.py. All v4 and earlier models were trained on the old 76-feature
-# set and will cause a dimension mismatch → heuristic fallback.
-DEFAULT_MODEL_VERSION="${DEFAULT_MODEL_VERSION:-v5_hgbm_enhanced}"
+# v6_benchmark is trained on real labeled evaluation chunks from the public
+# benchmark API (https://api.poker44.net/api/v1/benchmark). This eliminates
+# the synthetic sim-to-real gap. All v4 and earlier models were trained on
+# the old 76-feature set and will cause a dimension mismatch → fallback.
+DEFAULT_MODEL_VERSION="${DEFAULT_MODEL_VERSION:-v6_benchmark}"
 
 # Subtensor chain endpoint — use a specific URL to avoid DNS flapping and
 # WebSocket keepalive ping timeouts that crash the miner process.
@@ -82,19 +83,19 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # ----------------------------------------------------------------
 MINERS=(
   # wallet-name           hotkey               port  pm2-name            model-version
-  # All miners run v5_hgbm_enhanced (100-feature HistGBM).
-  # v4 and earlier models are incompatible with the current features.py (100 features)
-  # and will trigger a dimension-mismatch heuristic fallback.
-  "superbit-darnsin  poker-miner-26001  8091  poker44_miner_1   v5_hgbm_enhanced"
-  "superbit-darnsin  poker-miner-26002  8092  poker44_miner_2   v5_hgbm_enhanced"
-  "superbit-darnsin  poker-miner-26003  8093  poker44_miner_3   v5_hgbm_enhanced"
-  "superbit-darnsin  poker-miner-26009  8099  poker44_miner_9   v5_hgbm_enhanced"
-  "superbit-darnsin  poker-miner-26012  8102  poker44_miner_12  v5_hgbm_enhanced"
-  "superbit-darnsin  poker-miner-26015  8105  poker44_miner_15  v5_hgbm_enhanced"
-  "superbit-darnsin  poker-miner-26021  8111  poker44_miner_21  v5_hgbm_enhanced"
-  "superbit-darnsin  poker-miner-26004  8094  poker44_miner_22  v4_rf_mixed_large"
-  "superbit-darnsin  poker-miner-26005  8095  poker44_miner_25  v4_rf_mixed_large"
-  "superbit-darnsin  poker-miner-26006  8096  poker44_miner_26  v4_rf_mixed_large"
+  # All miners run v6_benchmark — trained on real labeled evaluation chunks
+  # from the public benchmark API. v4 and earlier are on the old 76-feature
+  # set and will dimension-mismatch → heuristic fallback.
+  "superbit-darnsin  poker-miner-26001  8091  poker44_miner_1   v6_benchmark"
+  "superbit-darnsin  poker-miner-26002  8092  poker44_miner_2   v6_benchmark"
+  "superbit-darnsin  poker-miner-26003  8093  poker44_miner_3   v6_benchmark"
+  "superbit-darnsin  poker-miner-26009  8099  poker44_miner_9   v6_benchmark"
+  "superbit-darnsin  poker-miner-26012  8102  poker44_miner_12  v6_benchmark"
+  "superbit-darnsin  poker-miner-26015  8105  poker44_miner_15  v6_benchmark"
+  "superbit-darnsin  poker-miner-26021  8111  poker44_miner_21  v6_benchmark"
+  "superbit-darnsin  poker-miner-26004  8094  poker44_miner_22  v6_benchmark"
+  "superbit-darnsin  poker-miner-26005  8095  poker44_miner_25  v6_benchmark"
+  "superbit-darnsin  poker-miner-26006  8096  poker44_miner_26  v6_benchmark"
 )
 
 # ----------------------------------------------------------------
