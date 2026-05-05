@@ -149,6 +149,41 @@ class BotDetector:
             return self._score_with_model(chunk)
         return self._score_heuristic(chunk)
 
+    def score_chunks_batch(self, chunks: List[List[Dict[str, Any]]]) -> List[float]:
+        """Score all chunks in one batched predict_proba call.
+
+        Much faster than calling score_chunk() in a loop because the model
+        processes a (N, 100) matrix in a single pass instead of N separate
+        (1, 100) calls through the CalibratedClassifierCV wrapper.
+        """
+        if not chunks:
+            return []
+
+        if self._model is None or self._feature_mismatch:
+            return [self._score_heuristic(chunk) for chunk in chunks]
+
+        try:
+            import warnings
+            feature_matrix = np.stack([
+                extract_chunk_features(chunk) for chunk in chunks
+            ])
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                probs = self._model.predict_proba(feature_matrix)[:, 1]
+            return [float(np.clip(p - _SCORE_BIAS, 0.0, 1.0)) for p in probs]
+        except ValueError as exc:
+            if not self._feature_mismatch:
+                bt.logging.warning(
+                    f"[BotDetector] Feature dimension mismatch in batch call "
+                    f"(version={self._model_version!r}): {exc}. "
+                    f"Falling back to heuristic for all chunks."
+                )
+                self._feature_mismatch = True
+            return [self._score_heuristic(chunk) for chunk in chunks]
+        except Exception as exc:
+            bt.logging.error(f"[BotDetector] Batch scoring error: {exc}")
+            return [self._score_heuristic(chunk) for chunk in chunks]
+
     def predict_chunk(self, chunk: List[Dict[str, Any]]) -> bool:
         """Binary prediction (used for synapse.predictions — note: validator ignores this)."""
         return self.score_chunk(chunk) >= 0.5

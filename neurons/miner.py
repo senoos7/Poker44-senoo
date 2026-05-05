@@ -170,37 +170,29 @@ class Miner(BaseMinerNeuron):
                 f"[QUERY SAMPLE HAND] data={json.dumps(sample_hand, default=str)}"
             )
 
-        import asyncio
+        import time
         import traceback
-        loop = asyncio.get_event_loop()
 
         try:
-            # Run CPU-bound inference in a thread pool so the asyncio event loop
-            # stays responsive (handles cancellation, heartbeats, other tasks).
-            # Without this, HistGBM inference blocks the entire event loop and the
-            # validator's timeout fires before the response is sent back.
-            ml_scores = await loop.run_in_executor(
-                None,
-                lambda: [self._detector.score_chunk(chunk) for chunk in chunks],
-            )
+            # Batch-score all chunks in a single predict_proba call.
+            # This is much faster than run_in_executor with 40 individual calls
+            # and avoids event-loop contention with background metagraph sync.
+            t0 = time.monotonic()
+            ml_scores = self._detector.score_chunks_batch(chunks)
             heuristic_scores = [self._score_chunk_heuristic(chunk) for chunk in chunks]
             scores = [self._blend(ml, h) for ml, h in zip(ml_scores, heuristic_scores)]
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
             synapse.risk_scores = scores
             predictions = [score >= 0.5 for score in scores]
             synapse.predictions = predictions
             synapse.model_manifest = dict(self.model_manifest)
-        except asyncio.CancelledError:
-            bt.logging.warning(
-                f"[FORWARD CANCELLED] validator timed out after sending {len(chunks)} chunks "
-                f"— consider reducing VPS load or validator timeout"
-            )
-            raise
+            bt.logging.debug(f"[INFERENCE] {elapsed_ms}ms for {len(chunks)} chunks")
         except Exception as exc:
             bt.logging.error(
                 f"[FORWARD ERROR] scoring failed for {len(chunks)} chunks: {exc}\n"
                 f"{traceback.format_exc()}"
             )
-            synapse.risk_scores = [0.0] * len(chunks)
+            synapse.risk_scores = [0.5] * len(chunks)
             synapse.predictions = [False] * len(chunks)
             return synapse
 
