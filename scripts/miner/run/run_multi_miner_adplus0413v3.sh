@@ -88,7 +88,7 @@ MINERS=(
   #   - Improved within-chunk consistency heuristic (40% weight)
   #   - _SCORE_BIAS removed (was artefact of isotonic calibration)
   # All other miners remain on v6_benchmark for stability.
-  "superbit-darnsin  poker-miner-26005  8095  poker44_miner_25  v7_sigmoid_calib"
+  "superbit-darnsin  poker-miner-26005  8201  poker44_miner_25  v7_sigmoid_calib"
 )
 
 # ----------------------------------------------------------------
