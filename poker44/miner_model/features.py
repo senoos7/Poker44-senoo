@@ -41,6 +41,7 @@ Key discriminators:
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from typing import Any, Dict, List
 
@@ -56,7 +57,7 @@ _CHECK_TYPES = {"check"}
 _FOLD_TYPES  = {"fold"}
 _BLIND_TYPES = {"small_blind", "big_blind", "ante"}
 
-_LOG4 = float(np.log(4.0))   # max possible street entropy denominator
+_LOG4 = math.log(4.0)   # max possible street entropy denominator
 
 
 def _safe_float(v: Any, default: float = 0.0) -> float:
@@ -134,8 +135,8 @@ def extract_hand_features(hand: Dict[str, Any]) -> np.ndarray:
     # --- Street entropy (bots concentrate on fewer streets → lower entropy) ---
     # Normalized to [0, 1] by dividing by log(4) — the maximum for 4 streets.
     fracs = [preflop_frac, flop_frac, turn_frac, river_frac]
-    raw_entropy = -sum(f * float(np.log(f + 1e-9)) for f in fracs)
-    street_entropy = float(np.clip(raw_entropy / _LOG4, 0.0, 1.0))
+    raw_entropy = -sum(f * math.log(f + 1e-9) for f in fracs)
+    street_entropy = min(max(raw_entropy / _LOG4, 0.0), 1.0)
 
     # --- Bet size diversity: unique non-zero bet sizes / total non-zero bets ---
     # Bots reuse exact bet sizes mechanically (e.g. always 2.0 BB) → low ratio.

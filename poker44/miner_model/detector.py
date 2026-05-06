@@ -59,6 +59,23 @@ _DEFAULT_MODEL_PATH = _MODEL_DIR / "model.pkl"
 _SCORE_BIAS = 0.06
 
 
+def _limit_threads():
+    """Limit BLAS/OpenMP threads to 1 for small inference matrices.
+
+    On high-core-count CPUs (16+), numpy/sklearn spin up all available
+    threads even for tiny (40×100) matrices. The thread synchronization
+    overhead completely dominates the actual computation, causing 60-second
+    delays instead of <1-second ones. Limiting to 1 thread for inference
+    eliminates this overhead while having zero impact on accuracy.
+    """
+    try:
+        from threadpoolctl import threadpool_limits
+        return threadpool_limits(limits=1)
+    except ImportError:
+        import contextlib
+        return contextlib.nullcontext()
+
+
 def _resolve_model_path() -> Path:
     """
     Resolve which model file to load.
@@ -116,6 +133,7 @@ class BotDetector:
                     f"[BotDetector] Model loaded: {type(self._model).__name__} "
                     f"(version={self._model_version!r})"
                 )
+                self._warmup_model()
             except Exception as exc:
                 bt.logging.error(
                     f"[BotDetector] Failed to load model from {self._model_path}: {exc}\n"
@@ -128,6 +146,37 @@ class BotDetector:
                 f"(version={self._model_version!r}). Using heuristic fallback. "
                 f"Run: python -m poker44.miner_model.train --version {self._model_version}"
             )
+
+    def _warmup_model(self) -> None:
+        """Run a dummy prediction to initialize BLAS/OpenMP thread pools.
+
+        Without this, the FIRST real query triggers thread pool initialization
+        for all 16 CPU cores, which can take 30-60 seconds on first call.
+        Warming up at startup moves this cost to startup time, not inference time.
+        """
+        if self._model is None:
+            return
+        import time
+        try:
+            # Use the actual feature dimension from the loaded model when possible.
+            try:
+                n_features = self._model.estimators_[0].n_features_in_
+            except (AttributeError, IndexError):
+                n_features = 4 * 25  # 100 features (4 stats × 25 per-hand features)
+            dummy = np.zeros((4, n_features), dtype=np.float32)
+            t0 = time.monotonic()
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                _limit_threads()
+                self._model.predict_proba(dummy)
+            elapsed = time.monotonic() - t0
+            bt.logging.info(
+                f"[BotDetector] Model warmed up in {elapsed:.2f}s "
+                f"(n_features={n_features})"
+            )
+        except Exception as exc:
+            bt.logging.warning(f"[BotDetector] Warm-up failed (non-fatal): {exc}")
 
     def is_model_loaded(self) -> bool:
         return self._model is not None and not self._feature_mismatch
@@ -155,6 +204,8 @@ class BotDetector:
         Much faster than calling score_chunk() in a loop because the model
         processes a (N, 100) matrix in a single pass instead of N separate
         (1, 100) calls through the CalibratedClassifierCV wrapper.
+        Limits BLAS/OpenMP threads to 1 to avoid thread-pool overhead on
+        high-core-count CPUs that makes small-matrix inference take 60+ seconds.
         """
         if not chunks:
             return []
@@ -163,13 +214,22 @@ class BotDetector:
             return [self._score_heuristic(chunk) for chunk in chunks]
 
         try:
+            import time
             import warnings
+            t_feat = time.monotonic()
             feature_matrix = np.stack([
                 extract_chunk_features(chunk) for chunk in chunks
             ])
-            with warnings.catch_warnings():
+            t_pred = time.monotonic()
+            with warnings.catch_warnings(), _limit_threads():
                 warnings.simplefilter("ignore")
                 probs = self._model.predict_proba(feature_matrix)[:, 1]
+            t_done = time.monotonic()
+            bt.logging.debug(
+                f"[BotDetector] feat={t_pred-t_feat:.3f}s "
+                f"predict={t_done-t_pred:.3f}s "
+                f"n={len(chunks)}"
+            )
             return [float(np.clip(p - _SCORE_BIAS, 0.0, 1.0)) for p in probs]
         except ValueError as exc:
             if not self._feature_mismatch:
