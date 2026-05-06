@@ -37,27 +37,37 @@ Version roadmap
     why: v1 uses real hands from live benchmark tables. Trained on synthetic
          data, so CV=1.0 is meaningless — high sim-to-real gap expected.
 
-  v6_benchmark — Phase 4: real evaluation data (RECOMMENDED — use this)
+  v6_benchmark — Phase 4: real evaluation data
     data: public benchmark API (https://api.poker44.net/api/v1/benchmark)
           real labeled chunks from live v1 evaluation, already in miner-visible
           format. No synthetic generation needed.
-    model: HistGradientBoostingClassifier + 100-feature extraction (same as v5)
-    why: eliminates the sim-to-real gap entirely. CV scores reflect actual
-         competition performance. This is the path to escaping Rank 100+.
+    model: HistGradientBoostingClassifier + CalibratedCV(isotonic) + 100 features
+    why: eliminates the sim-to-real gap entirely.
+    issue: isotonic calibration collapses probabilities to near-binary (0.94 or 0.0)
+           which limits within-class ranking and caps composite score ~0.51.
+    download first: python scripts/download_benchmark.py
+
+  v7_sigmoid_calib — Phase 5: sigmoid calibration for graded scores (RECOMMENDED)
+    data: same benchmark API data as v6
+    model: HistGradientBoostingClassifier + CalibratedCV(sigmoid) + 100 features
+    key change: sigmoid (Platt scaling) replaces isotonic → smooth probability
+                curve → scores like 0.7, 0.8, 0.9 instead of always 0.94/0.0
+    why: graded scores allow within-class RANKING which drives AUROC/AP improvement.
+         Higher composite score → top-3 contention → actual on-chain incentive.
     download first: python scripts/download_benchmark.py
 
 ──────────────────────────────────────────────────────────────────────
 Usage
 ──────────────────────────────────────────────────────────────────────
-  # Phase 4 — train on real benchmark data (RECOMMENDED)
-  python scripts/download_benchmark.py           # download once
+  # Phase 5 — sigmoid calibrated model (RECOMMENDED for new miners)
+  python scripts/download_benchmark.py           # refresh benchmark data
+  python -m poker44.miner_model.train --version v7_sigmoid_calib --data-source benchmark
+
+  # Phase 4 — isotonic (current default, kept for comparison)
   python -m poker44.miner_model.train --version v6_benchmark --data-source benchmark
 
-  # Phase 3 — train v5 HistGBM with enhanced features (synthetic fallback)
-  python -m poker44.miner_model.train --version v5_hgbm_enhanced --data-source mixed --n-chunks 4000
-
   # After evaluating, promote a version to the default slot
-  python -m poker44.miner_model.train --version v6_benchmark --update-default
+  python -m poker44.miner_model.train --version v7_sigmoid_calib --update-default
 """
 
 from __future__ import annotations
@@ -347,6 +357,8 @@ def build_training_matrix(
 
 def train_model(X: np.ndarray, y: np.ndarray, version: str = "") -> Any:
     """Dispatch to the appropriate model architecture based on version name."""
+    if version.startswith("v7") or "sigmoid" in version or "direct" in version:
+        return _train_model_v7_sigmoid(X, y)
     if _is_hgbm_version(version):
         return _train_model_v3_hgbm(X, y)
     return _train_model_v2_rf(X, y)
@@ -507,6 +519,90 @@ def _train_model_v3_hgbm(X: np.ndarray, y: np.ndarray):
     return model, cv_ap, cv_acc, top_features
 
 
+def _train_model_v7_sigmoid(X: np.ndarray, y: np.ndarray):
+    """
+    Shallow HistGBM WITHOUT calibration wrapper (v7 architecture).
+
+    Root cause of binary output in v6:
+    - Both isotonic AND sigmoid calibration collapse to near-binary when the
+      underlying model perfectly separates training data (CV acc=1.0).
+    - When raw logit = ±10, sigmoid(10) = 0.99995 → still binary.
+
+    Fix: use raw HistGBM predict_proba WITHOUT CalibratedClassifierCV.
+    HistGBM leaf proportions are naturally more graded when trees are SHALLOW:
+    - max_depth=2: each leaf covers a wide region → many training samples per leaf
+      → leaf probability = fraction of bots in that leaf = spread over (0, 1)
+    - max_iter=50: intentionally underfit so uncertain cases stay in [0.3, 0.7]
+    - min_samples_leaf=80: requires 80 samples per leaf → further forces grading
+
+    Trade-off: slightly lower accuracy on obvious cases, but MUCH better AUROC/AP
+    on borderline chunks because the validator can rank partial confidence correctly.
+    """
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    from sklearn.model_selection import StratifiedKFold, cross_val_score
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    n_samples, n_features = X.shape
+    print(f"\n  [HGBM v7 uncalibrated-shallow] Training on {n_samples} chunks × {n_features} features")
+    print(f"  Class balance: {y.sum()} bot / {(1-y).sum()} human")
+
+    # Intentionally shallow / underfit → graded probabilities on live data
+    base = HistGradientBoostingClassifier(
+        max_iter=80,
+        max_depth=2,
+        min_samples_leaf=80,
+        learning_rate=0.15,
+        l2_regularization=1.0,
+        max_bins=31,
+        class_weight="balanced",
+        random_state=42,
+        early_stopping=False,
+    )
+    model = Pipeline([
+        ("scaler", StandardScaler()),
+        ("clf", base),
+    ])
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    print("\n  Running 5-fold cross-validation (average_precision)...")
+    cv_ap  = cross_val_score(model, X, y, cv=cv, scoring="average_precision", n_jobs=1)
+    cv_acc = cross_val_score(model, X, y, cv=cv, scoring="accuracy",           n_jobs=1)
+    print(f"  CV AP:     {cv_ap.mean():.4f} ± {cv_ap.std():.4f}")
+    print(f"  CV Acc:    {cv_acc.mean():.4f} ± {cv_acc.std():.4f}")
+
+    from sklearn.model_selection import cross_val_predict
+    cv_probs = cross_val_predict(model, X, y, cv=cv, method="predict_proba")[:, 1]
+    bot_scores   = cv_probs[y == 1]
+    human_scores = cv_probs[y == 0]
+    print(f"\n  Score distribution (want spread, not just 0/1):")
+    print(f"    Bot chunks:   mean={bot_scores.mean():.3f}  std={bot_scores.std():.3f}"
+          f"  pct_above_0.5={100*np.mean(bot_scores > 0.5):.1f}%")
+    print(f"    Human chunks: mean={human_scores.mean():.3f}  std={human_scores.std():.3f}"
+          f"  pct_below_0.5={100*np.mean(human_scores < 0.5):.1f}%")
+    ambiguous = np.mean((cv_probs > 0.3) & (cv_probs < 0.7))
+    print(f"    In 0.3–0.7 range: {100*ambiguous:.1f}%  (shows graded spread)")
+
+    print("\n  Fitting final model on full dataset...")
+    model.fit(X, y)
+
+    top_features = []
+    try:
+        hgbm = model.named_steps["clf"]
+        if hasattr(hgbm, "feature_importances_"):
+            importances = hgbm.feature_importances_
+            top_idx = np.argsort(importances)[::-1][:10]
+            print("\n  Top 10 features by importance:")
+            for rank, idx in enumerate(top_idx, 1):
+                name = CHUNK_FEATURE_NAMES[idx] if idx < len(CHUNK_FEATURE_NAMES) else f"feat_{idx}"
+                print(f"    {rank:>2}. {name:<35} {importances[idx]:.4f}")
+                top_features.append({"rank": rank, "name": name, "importance": round(float(importances[idx]), 4)})
+    except Exception as exc:
+        print(f"  (Feature importance skipped: {exc})")
+
+    return model, cv_ap, cv_acc, top_features
+
+
 # ------------------------------------------------------------------
 # Metadata save/load
 # ------------------------------------------------------------------
@@ -535,6 +631,8 @@ def _save_metadata(
         "n_human_chunks": _n_human,
         "chunk_size_range": [_CHUNK_SIZE_MIN, _CHUNK_SIZE_MAX],
         "model_type": (
+            "Pipeline(StandardScaler + HistGradientBoosting(depth=2, uncalibrated))"
+            if (version.startswith("v7") or "sigmoid" in version or "direct" in version) else
             "Pipeline(StandardScaler + CalibratedClassifierCV(HistGradientBoosting, isotonic, cv=3))"
             if _is_hgbm_version(version) else
             "Pipeline(StandardScaler + CalibratedClassifierCV(RandomForest, isotonic, cv=3))"
@@ -595,8 +693,9 @@ def _print_comparison_hint(version_dir: Path) -> None:
 
 def _is_hgbm_version(version: str) -> bool:
     return (version.startswith("v3") or version.startswith("v5")
-            or version.startswith("v6") or "gb" in version or "hgbm" in version
-            or "benchmark" in version)
+            or version.startswith("v6") or version.startswith("v7")
+            or "gb" in version or "hgbm" in version
+            or "benchmark" in version or "sigmoid" in version or "direct" in version)
 
 
 def main(

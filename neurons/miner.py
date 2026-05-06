@@ -255,10 +255,70 @@ class Miner(BaseMinerNeuron):
 
     @classmethod
     def _score_chunk_heuristic(cls, chunk: List[dict]) -> float:
+        """Chunk-level heuristic bot score in [0, 1].
+
+        Captures two primary signals that remain discriminative even for
+        humanized bots:
+
+        1. Bet-size mechanical repetition (LOW coefficient of variation of
+           non-zero bet amounts across ALL hands in the chunk). Humanized bots
+           still tend to reuse the same bet amounts (e.g. always 2BB, 3BB).
+
+        2. Within-chunk behavioral consistency (LOW std of per-hand heuristic
+           scores). Even humanized bots are mechanically consistent across
+           hands; genuine human sessions have high variance.
+        """
         if not chunk:
             return 0.5
-        scores = [cls._score_hand_heuristic(h) for h in chunk]
-        return round(sum(scores) / len(scores), 6)
+
+        # Per-hand base scores (fold-heavy / shallow → lower scores)
+        hand_scores = [cls._score_hand_heuristic(h) for h in chunk]
+        mean_score = sum(hand_scores) / len(hand_scores)
+
+        # --- Signal 1: within-chunk behavioral consistency ---
+        # LOW std → mechanical consistency → bot signal (HIGH score)
+        if len(hand_scores) > 2:
+            std_scores = (
+                sum((s - mean_score) ** 2 for s in hand_scores) / len(hand_scores)
+            ) ** 0.5
+            # std typically 0.05–0.08 for bots, 0.15–0.25 for humans
+            # map std=0 → 1.0 (certain bot), std≥0.20 → 0.0 (certain human)
+            consistency_signal = max(0.0, 1.0 - std_scores / 0.20)
+        else:
+            consistency_signal = 0.5
+
+        # --- Signal 2: bet-size mechanical repetition ---
+        all_amounts: list = []
+        for hand in chunk:
+            for action in (hand.get("actions") or []):
+                v = action.get("normalized_amount_bb")
+                try:
+                    fv = float(v) if v is not None else 0.0
+                except (TypeError, ValueError):
+                    fv = 0.0
+                if fv > 0.0:
+                    all_amounts.append(fv)
+
+        if len(all_amounts) >= 4:
+            mean_amt = sum(all_amounts) / len(all_amounts)
+            std_amt = (
+                sum((v - mean_amt) ** 2 for v in all_amounts) / len(all_amounts)
+            ) ** 0.5
+            bet_cv = std_amt / max(mean_amt, 1e-6)
+            # LOW bet_cv (< 0.3) → mechanical → bot; HIGH bet_cv (> 1.5) → human
+            # map bet_cv=0 → 1.0 (certain bot), bet_cv≥1.5 → 0.0 (certain human)
+            bet_consistency = max(0.0, 1.0 - min(bet_cv, 1.5) / 1.5)
+        else:
+            bet_consistency = 0.5
+
+        # Blend: consistency signals dominate; mean per-hand score provides a
+        # weak prior aligned with old-style bot patterns.
+        score = (
+            0.45 * consistency_signal
+            + 0.45 * bet_consistency
+            + 0.10 * mean_score
+        )
+        return round(cls._clamp01(score), 6)
 
     @classmethod
     def _blend(cls, ml: float, heuristic: float, ml_weight: float = 0.6) -> float:

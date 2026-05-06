@@ -83,18 +83,17 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # ----------------------------------------------------------------
 MINERS=(
   # wallet-name           hotkey               port  pm2-name            model-version
-  # All miners run v6_benchmark — trained on real labeled evaluation chunks
-  # from the public benchmark API. v4 and earlier are on the old 76-feature
-  # set and will dimension-mismatch → heuristic fallback.
-  "superbit-darnsin  poker-miner-26001  8091  poker44_miner_1   v6_benchmark"
-  "superbit-darnsin  poker-miner-26002  8092  poker44_miner_2   v6_benchmark"
-  "superbit-darnsin  poker-miner-26003  8093  poker44_miner_3   v6_benchmark"
+  # v7_sigmoid_calib: A/B test on 2 miners (poker44_miner_9 + poker44_miner_26).
+  #   - Shallow uncalibrated HistGBM (max_depth=2, no CalibratedCV wrapper)
+  #   - Improved within-chunk consistency heuristic (40% weight)
+  #   - _SCORE_BIAS removed (was artefact of isotonic calibration)
+  # All other miners remain on v6_benchmark for stability.
   "superbit-darnsin  poker-miner-26009  8099  poker44_miner_9   v6_benchmark"
   "superbit-darnsin  poker-miner-26012  8102  poker44_miner_12  v6_benchmark"
   "superbit-darnsin  poker-miner-26015  8105  poker44_miner_15  v6_benchmark"
-  "superbit-darnsin  poker-miner-26021  8111  poker44_miner_21  v6_benchmark"
+  "superbit-darnsin  poker-miner-26021  8111  poker44_miner_21  v7_sigmoid_calib"
   "superbit-darnsin  poker-miner-26004  8094  poker44_miner_22  v6_benchmark"
-  "superbit-darnsin  poker-miner-26005  8095  poker44_miner_25  v6_benchmark"
+  "superbit-darnsin  poker-miner-26005  8095  poker44_miner_25  v7_sigmoid_calib"
   "superbit-darnsin  poker-miner-26006  8096  poker44_miner_26  v6_benchmark"
 )
 

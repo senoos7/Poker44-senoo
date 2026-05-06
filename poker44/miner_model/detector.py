@@ -56,7 +56,10 @@ _DEFAULT_MODEL_PATH = _MODEL_DIR / "model.pkl"
 # before returning. This pushes borderline human chunks (0.50–0.56) below the
 # validator's 0.5 rounding threshold, protecting against FPR spikes.
 # It has negligible effect on confident bot predictions (0.75+ stays bot).
-_SCORE_BIAS = 0.06
+# Bias was used to compensate for isotonic calibration pushing scores just
+# above 0.5 for humans. With the new heuristic and v7 model this is no
+# longer needed and would systematically downshift graded probabilities.
+_SCORE_BIAS = 0.0
 
 
 def _limit_threads():
