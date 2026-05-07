@@ -91,8 +91,14 @@ class Miner(BaseMinerNeuron):
                     "https://github.com/senoos7/Poker44-senoo",
                 ),
                 "repo_commit": _auto_commit,
-                "notes": "RandomForest bot-detector trained on mixed human/bot chunk data.",
-                "open_source": True,
+                "notes": "HistGBM bot-detector trained on Poker44 public benchmark data.",
+                # open_source controls the integrity check:
+                #   True  → validator fetches repo_url + repo_commit → PUBLIC repo required
+                #   False → miner shows as "opaque" (currently NOT zeroed per owner policy)
+                # Set POKER44_MODEL_OPEN_SOURCE=true (or flip default) only after making
+                # https://github.com/senoos7/Poker44-senoo public.
+                "open_source": os.getenv("POKER44_MODEL_OPEN_SOURCE", "false").strip().lower()
+                               in {"1", "true", "yes"},
                 "inference_mode": "remote",
                 "training_data_statement": (
                     "Trained on synthetic and mixed human/bot chunk data derived from the "
