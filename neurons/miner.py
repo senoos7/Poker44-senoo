@@ -126,11 +126,22 @@ class Miner(BaseMinerNeuron):
         bt.logging.info(f"Axon created: {self.axon}")
 
     def _log_manifest_startup(self, repo_root: Path) -> None:
-        bt.logging.info("Open-sourced miner manifest standard active for this miner.")
-        bt.logging.info(
-            f"Miner transparency status: {self.manifest_compliance['status']} "
-            f"(missing_fields={self.manifest_compliance['missing_fields']})"
-        )
+        status = self.manifest_compliance["status"]
+        missing = self.manifest_compliance["missing_fields"]
+        os_flag = self.model_manifest.get("open_source")
+        # evaluate_manifest_compliance puts 'open_source' in missing_fields when
+        # open_source is False — meaning "not transparent", not "field absent".
+        if status == "opaque" and missing == ["open_source"] and os_flag is False:
+            bt.logging.info(
+                "Miner transparency: opaque (open_source=false). "
+                "Validators skip public-repo integrity checks; expected while repo is private."
+            )
+        else:
+            bt.logging.info(
+                f"Miner transparency status: {status} "
+                f"(missing_fields={missing}, policy_violations="
+                f"{self.manifest_compliance.get('policy_violations', [])})"
+            )
         bt.logging.info(
             f"Manifest summary | model={self.model_manifest.get('model_name', '')} "
             f"version={self.model_manifest.get('model_version', '')} "
