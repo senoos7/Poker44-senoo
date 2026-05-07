@@ -66,6 +66,9 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # ----------------------------------------------------------------
 MINERS=(
   # wallet-name           hotkey               port  pm2-name            model-version
+  "superbit-darnsin  poker-miner-26007  8101  poker44_miner_27  v7_sigmoid_calib"
+  "superbit-darnsin  poker-miner-26008  8102  poker44_miner_28  v7_sigmoid_calib"
+
 )
 
 # ----------------------------------------------------------------
