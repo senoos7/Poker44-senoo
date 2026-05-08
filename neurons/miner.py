@@ -60,9 +60,11 @@ class Miner(BaseMinerNeuron):
         except Exception:
             _auto_commit = ""
 
-        # Use the MODEL_VERSION env var (set by run scripts) so the manifest
-        # version field matches the actual model file being loaded.
-        _model_version = os.getenv("MODEL_VERSION", self._detector.model_label or "v4_rf_mixed")
+        # Keep the public manifest version separate from MODEL_VERSION.
+        # MODEL_VERSION controls the local model folder to load, while the
+        # manifest version is dashboard-facing and should not expose internal
+        # experiment names such as v6_benchmark or v7_sigmoid_calib.
+        _model_version = os.getenv("POKER44_MODEL_VERSION", "1.0.5")
 
         self.model_manifest = build_local_model_manifest(
             repo_root=repo_root,

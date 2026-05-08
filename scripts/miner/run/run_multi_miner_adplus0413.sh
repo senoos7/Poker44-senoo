@@ -43,6 +43,13 @@ PYTHON="${PYTHON:-$(which python3)}"
 # the old 76-feature set and will cause a dimension mismatch → fallback.
 DEFAULT_MODEL_VERSION="${DEFAULT_MODEL_VERSION:-v6_benchmark}"
 
+# Public manifest labels shown on the dashboard. Keep these generic so the
+# dashboard does not expose internal model folder names such as v6_benchmark
+# or v7_sigmoid_calib. MODEL_VERSION below still controls the actual local
+# model folder that gets loaded by BotDetector.
+PUBLIC_MODEL_NAME="${PUBLIC_MODEL_NAME:-p44-action-profile-detector}"
+PUBLIC_MODEL_VERSION="${PUBLIC_MODEL_VERSION:-1.0.5}"
+
 # Subtensor chain endpoint — use a specific URL to avoid DNS flapping and
 # WebSocket keepalive ping timeouts that crash the miner process.
 # Override: SUBTENSOR_ENDPOINT=wss://... ./run_multi_miner.sh start
@@ -166,8 +173,8 @@ start_all() {
 
     # shellcheck disable=SC2046
     MODEL_VERSION="$_MODEL_VER" \
-    POKER44_MODEL_VERSION="$_MODEL_VER" \
-    POKER44_MODEL_NAME="poker44-rf-bot-detector" \
+    POKER44_MODEL_VERSION="$PUBLIC_MODEL_VERSION" \
+    POKER44_MODEL_NAME="$PUBLIC_MODEL_NAME" \
     POKER44_MODEL_REPO_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo '')" \
     pm2 start "$MINER_SCRIPT" \
       --name "$_PM2_NAME" \
@@ -200,8 +207,8 @@ restart_all() {
     echo "Restarting: $_PM2_NAME  (wallet=$_WALLET  model=$_MODEL_VER)"
     # --update-env refreshes MODEL_VERSION in pm2's stored process env
     MODEL_VERSION="$_MODEL_VER" \
-    POKER44_MODEL_VERSION="$_MODEL_VER" \
-    POKER44_MODEL_NAME="poker44-rf-bot-detector" \
+    POKER44_MODEL_VERSION="$PUBLIC_MODEL_VERSION" \
+    POKER44_MODEL_NAME="$PUBLIC_MODEL_NAME" \
     POKER44_MODEL_REPO_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo '')" \
     pm2 restart "$_PM2_NAME" --update-env 2>/dev/null \
       || echo "  ($_PM2_NAME not found — run 'start' first)"

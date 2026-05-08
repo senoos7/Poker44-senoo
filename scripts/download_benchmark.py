@@ -111,15 +111,31 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     if out_path.exists() and not args.force:
-        print(f"Output already exists: {out_path}")
-        print("Use --force to re-download.")
-        # Still print summary
+        # Check if new dates have been released since last download.
         with gzip.open(out_path, "rt") as f:
             existing = json.load(f)
         m = existing["meta"]
-        print(f"  chunks={len(existing['chunks'])}  hands={m['total_hands']}"
-              f"  dates={m['dates']}")
-        return
+        existing_dates = set(m["dates"])
+        print(f"Cached: {len(existing['chunks'])} chunks, dates={sorted(existing_dates)}")
+
+        try:
+            print("Checking for new releases...")
+            releases = fetch_releases()
+            available_dates = {r["sourceDate"] for r in releases}
+            new_dates = sorted(available_dates - existing_dates)
+            if new_dates:
+                print(f"  NEW dates available: {new_dates}  → re-downloading with --force")
+                # Fall through to re-download
+            else:
+                print(f"  No new dates. Up to date.")
+                print(f"  chunks={len(existing['chunks'])}  hands={m['total_hands']}"
+                      f"  dates={sorted(existing_dates)}")
+                return
+        except Exception as exc:
+            print(f"  Could not check for new releases ({exc}). Use --force to re-download.")
+            print(f"  chunks={len(existing['chunks'])}  hands={m['total_hands']}"
+                  f"  dates={sorted(existing_dates)}")
+            return
 
     print("=" * 60)
     print("  Poker44 Benchmark Downloader")
