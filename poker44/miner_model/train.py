@@ -357,6 +357,8 @@ def build_training_matrix(
 
 def train_model(X: np.ndarray, y: np.ndarray, version: str = "") -> Any:
     """Dispatch to the appropriate model architecture based on version name."""
+    if (version.startswith("v8") or "structured" in version or "ensemble" in version):
+        return _train_model_v8_structured(X, y)
     if version.startswith("v7") or "sigmoid" in version or "direct" in version:
         return _train_model_v7_sigmoid(X, y)
     if _is_hgbm_version(version):
@@ -603,6 +605,121 @@ def _train_model_v7_sigmoid(X: np.ndarray, y: np.ndarray):
     return model, cv_ap, cv_acc, top_features
 
 
+def _train_model_v8_structured(X: np.ndarray, y: np.ndarray):
+    """
+    Soft-voting ensemble: HistGBM + ExtraTrees + LogisticRegression.
+
+    Why ensemble (vs a single model):
+    - Top-ranked competitor miners use 'structured-action-chunk-detector' and
+      'extra-trees' style models. ExtraTrees randomizes splits, which gives
+      better generalization on distribution-shifted live data.
+    - LogisticRegression on standardized features acts as a smooth, calibrated
+      tie-breaker, mapping each tree's hard split into a graded probability —
+      this is the key to escaping the bimodal 0.94 / 0.0 trap.
+    - Averaging three models with different inductive biases reduces variance
+      and produces well-spread probabilities (target: 0.2–0.8 for ambiguous
+      chunks, instead of binary).
+
+    Designed to consume the v8 feature set (34 per-hand × 4 = 136 features)
+    which now includes structural / sequence signals (bigram diversity,
+    actor concentration, pot-relative sizing, repeat amounts).
+    """
+    from sklearn.ensemble import (
+        HistGradientBoostingClassifier,
+        ExtraTreesClassifier,
+        VotingClassifier,
+    )
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.model_selection import StratifiedKFold, cross_val_score
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    n_samples, n_features = X.shape
+    print(f"\n  [v8 structured ensemble] Training on {n_samples} chunks × {n_features} features")
+    print(f"  Class balance: {y.sum()} bot / {(1-y).sum()} human")
+
+    hgbm = HistGradientBoostingClassifier(
+        max_iter=160,
+        max_depth=4,
+        min_samples_leaf=40,
+        learning_rate=0.07,
+        l2_regularization=0.5,
+        max_bins=63,
+        class_weight="balanced",
+        random_state=42,
+        early_stopping=False,
+    )
+    et = ExtraTreesClassifier(
+        n_estimators=400,
+        max_depth=14,
+        min_samples_leaf=4,
+        max_features="sqrt",
+        bootstrap=False,
+        class_weight="balanced",
+        random_state=42,
+        n_jobs=1,
+    )
+    lr = LogisticRegression(
+        C=0.5,
+        max_iter=500,
+        class_weight="balanced",
+        solver="lbfgs",
+        random_state=42,
+    )
+
+    voter = VotingClassifier(
+        estimators=[("hgbm", hgbm), ("et", et), ("lr", lr)],
+        voting="soft",
+        weights=[2.0, 2.0, 1.0],
+        n_jobs=1,
+    )
+    model = Pipeline([
+        ("scaler", StandardScaler()),
+        ("clf", voter),
+    ])
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    print("\n  Running 5-fold cross-validation (average_precision)...")
+    cv_ap  = cross_val_score(model, X, y, cv=cv, scoring="average_precision", n_jobs=1)
+    cv_acc = cross_val_score(model, X, y, cv=cv, scoring="accuracy",           n_jobs=1)
+    print(f"  CV AP:     {cv_ap.mean():.4f} ± {cv_ap.std():.4f}")
+    print(f"  CV Acc:    {cv_acc.mean():.4f} ± {cv_acc.std():.4f}")
+
+    from sklearn.model_selection import cross_val_predict
+    cv_probs = cross_val_predict(model, X, y, cv=cv, method="predict_proba")[:, 1]
+    bot_scores   = cv_probs[y == 1]
+    human_scores = cv_probs[y == 0]
+    print(f"\n  Score spread (want graded, not binary):")
+    print(f"    Bot chunks:   mean={bot_scores.mean():.3f}  std={bot_scores.std():.3f}"
+          f"  pct_above_0.5={100*np.mean(bot_scores > 0.5):.1f}%")
+    print(f"    Human chunks: mean={human_scores.mean():.3f}  std={human_scores.std():.3f}"
+          f"  pct_below_0.5={100*np.mean(human_scores < 0.5):.1f}%")
+    in_band = np.mean((cv_probs > 0.2) & (cv_probs < 0.8))
+    print(f"    In 0.2–0.8 range: {100*in_band:.1f}%  (graded chunks → better AUROC)")
+
+    print("\n  Fitting final model on full dataset...")
+    model.fit(X, y)
+
+    # Feature importance from ExtraTrees (most interpretable of the three)
+    top_features = []
+    try:
+        et_fitted = model.named_steps["clf"].named_estimators_["et"]
+        if hasattr(et_fitted, "feature_importances_"):
+            importances = et_fitted.feature_importances_
+            top_idx = np.argsort(importances)[::-1][:12]
+            print("\n  Top 12 features by ExtraTrees importance:")
+            for rank, idx in enumerate(top_idx, 1):
+                name = CHUNK_FEATURE_NAMES[idx] if idx < len(CHUNK_FEATURE_NAMES) else f"feat_{idx}"
+                print(f"    {rank:>2}. {name:<35} {importances[idx]:.4f}")
+                top_features.append(
+                    {"rank": rank, "name": name, "importance": round(float(importances[idx]), 4)}
+                )
+    except Exception as exc:
+        print(f"  (Feature importance skipped: {exc})")
+
+    return model, cv_ap, cv_acc, top_features
+
+
 # ------------------------------------------------------------------
 # Metadata save/load
 # ------------------------------------------------------------------
@@ -631,6 +748,8 @@ def _save_metadata(
         "n_human_chunks": _n_human,
         "chunk_size_range": [_CHUNK_SIZE_MIN, _CHUNK_SIZE_MAX],
         "model_type": (
+            "Pipeline(StandardScaler + Voting(HistGBM + ExtraTrees + LogReg))"
+            if (version.startswith("v8") or "structured" in version or "ensemble" in version) else
             "Pipeline(StandardScaler + HistGradientBoosting(depth=2, uncalibrated))"
             if (version.startswith("v7") or "sigmoid" in version or "direct" in version) else
             "Pipeline(StandardScaler + CalibratedClassifierCV(HistGradientBoosting, isotonic, cv=3))"
@@ -694,7 +813,9 @@ def _print_comparison_hint(version_dir: Path) -> None:
 def _is_hgbm_version(version: str) -> bool:
     return (version.startswith("v3") or version.startswith("v5")
             or version.startswith("v6") or version.startswith("v7")
+            or version.startswith("v8")
             or "gb" in version or "hgbm" in version
+            or "structured" in version or "ensemble" in version
             or "benchmark" in version or "sigmoid" in version or "direct" in version)
 
 

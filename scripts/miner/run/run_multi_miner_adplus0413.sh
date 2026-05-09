@@ -90,17 +90,19 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # ----------------------------------------------------------------
 MINERS=(
   # wallet-name           hotkey               port  pm2-name            model-version
-  # v7_sigmoid_calib: A/B test on 2 miners (poker44_miner_9 + poker44_miner_26).
-  #   - Shallow uncalibrated HistGBM (max_depth=2, no CalibratedCV wrapper)
-  #   - Improved within-chunk consistency heuristic (40% weight)
-  #   - _SCORE_BIAS removed (was artefact of isotonic calibration)
-  # All other miners remain on v6_benchmark for stability.
-  "superbit-darnsin  poker-miner-26001  8091  poker44_miner_1   v6_benchmark"
+  # v8_structured  : new ensemble (HistGBM + ExtraTrees + LogReg) on
+  #                  136 features incl. structural / sequence signals
+  #                  (bigram diversity, actor concentration, pot-relative
+  #                  sizing, repeat amounts). A/B on 2 miners.
+  # v7_sigmoid_calib: shallow uncalibrated HistGBM (graded probabilities).
+  # v6_benchmark    : default isotonic-calibrated HistGBM.
+  # All models retrained on the latest benchmark dataset (incl. 2026-05-08).
+  "superbit-darnsin  poker-miner-26001  8091  poker44_miner_1   v8_structured"
   "superbit-darnsin  poker-miner-26002  8092  poker44_miner_2   v7_sigmoid_calib"
   "superbit-darnsin  poker-miner-26003  8093  poker44_miner_3   v6_benchmark"
   "superbit-darnsin  poker-miner-26004  8094  poker44_miner_22  v6_benchmark"
   "superbit-darnsin  poker-miner-26005  8201  poker44_miner_25  v7_sigmoid_calib"
-  "superbit-darnsin  poker-miner-26006  8100  poker44_miner_26  v6_benchmark"
+  "superbit-darnsin  poker-miner-26006  8100  poker44_miner_26  v8_structured"
   "superbit-darnsin  poker-miner-26009  8099  poker44_miner_9   v6_benchmark"
   "superbit-darnsin  poker-miner-26012  8102  poker44_miner_12  v6_benchmark"
   "superbit-darnsin  poker-miner-26015  8105  poker44_miner_15  v6_benchmark"

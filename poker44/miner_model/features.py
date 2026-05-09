@@ -49,7 +49,13 @@ import numpy as np
 
 _MINER_ACTION_WINDOW = 12
 _POST_FLOP_STREETS = {"flop", "turn", "river"}
-_N_HAND_FEATURES = 25
+# Per-hand features:
+#   25 statistical aggregates (street fractions, action fractions, sizing,
+#       stacks, aggression, entropy, blind_frac, etc.)
+#    9 structural / sequence features (bigram diversity, actor concentration,
+#       pot-relative sizing, repeat-amount mechanical patterns, etc.)
+# Total = 34 → chunk features = 4 × 34 = 136
+_N_HAND_FEATURES = 34
 
 _RAISE_TYPES = {"raise", "bet", "all_in"}
 _CALL_TYPES  = {"call"}
@@ -178,6 +184,107 @@ def extract_hand_features(hand: Dict[str, Any]) -> np.ndarray:
     # --- Normalized action count ---
     n_actions_norm = len(actions) / _MINER_ACTION_WINDOW
 
+    # ====================================================================
+    # Structural / sequence features (v8) — target patterns that bots
+    # struggle to fake even when overall action statistics look human-like.
+    # ====================================================================
+
+    # --- Action bigram diversity ---
+    # Mechanical bots reuse short action patterns ("fold→fold", "check→check").
+    # unique bigrams / total bigrams is high for humans, low for bots.
+    if len(act_types) >= 2:
+        bigrams = list(zip(act_types[:-1], act_types[1:]))
+        bigram_diversity = len(set(bigrams)) / max(len(bigrams), 1)
+    else:
+        bigram_diversity = 0.0
+
+    # --- Longest consecutive identical-action run ---
+    # Bot loops produce check→check→check→… far more than human play does.
+    if act_types:
+        max_run = cur_run = 1
+        prev = act_types[0]
+        for t in act_types[1:]:
+            if t == prev:
+                cur_run += 1
+                if cur_run > max_run:
+                    max_run = cur_run
+            else:
+                cur_run = 1
+                prev = t
+        max_consec_run_norm = max_run / total_slots
+    else:
+        max_consec_run_norm = 0.0
+
+    # --- Actor concentration ---
+    # If a single seat performs most of the actions (early folder, lone shover)
+    # it points at trivial bot profiles.
+    actor_seats = [a.get("actor_seat") for a in actions]
+    actor_counts = Counter(s for s in actor_seats if s is not None)
+    if actor_counts:
+        top_actor_count = max(actor_counts.values())
+        actor_concentration = top_actor_count / total_slots
+        # entropy of actor distribution, normalized to [0, 1]
+        n_actors = len(actor_counts)
+        if n_actors > 1:
+            log_n = math.log(n_actors)
+            ent = 0.0
+            denom = sum(actor_counts.values())
+            for c in actor_counts.values():
+                p = c / denom
+                ent -= p * math.log(p + 1e-9)
+            actor_entropy = min(max(ent / log_n, 0.0), 1.0)
+        else:
+            actor_entropy = 0.0
+    else:
+        actor_concentration = 0.0
+        actor_entropy = 0.0
+
+    # --- Pot-relative bet sizing ---
+    # Bots often use absolute BB sizing; humans react to current pot. Computing
+    # bet_amount / pot_before captures whether sizing is dynamic.
+    bet_to_pot = []
+    for a, amt in zip(actions, act_amounts):
+        if amt > 0.0:
+            pb = float(a.get("pot_before") or 0.0) / 0.02  # in BB
+            if pb > 0.5:  # require a non-trivial pot
+                bet_to_pot.append(min(amt / pb, 10.0))
+    if bet_to_pot:
+        bet_to_pot_mean = sum(bet_to_pot) / len(bet_to_pot)
+        if len(bet_to_pot) > 1:
+            _bm = bet_to_pot_mean
+            bet_to_pot_std = (
+                sum((v - _bm) ** 2 for v in bet_to_pot) / len(bet_to_pot)
+            ) ** 0.5
+        else:
+            bet_to_pot_std = 0.0
+    else:
+        bet_to_pot_mean = 0.0
+        bet_to_pot_std = 0.0
+
+    # --- Repeat-amount fraction ---
+    # When a bot has a single hard-coded bet size, the modal amount dominates.
+    if non_zero_amounts:
+        amt_counts = Counter(round(x, 2) for x in non_zero_amounts)
+        modal_count = max(amt_counts.values())
+        repeat_amount_frac = modal_count / len(non_zero_amounts)
+    else:
+        repeat_amount_frac = 0.0
+
+    # --- Pot growth ---
+    # log of (final pot / first pot_before). Bots often skip pot-building or
+    # explode it in one shot; humans grow it gradually.
+    if act_pot_after:
+        first_pot_before = float(actions[0].get("pot_before") or 0.0)
+        if first_pot_before > 1e-9:
+            pot_growth = math.log(
+                max(act_pot_after[-1] / first_pot_before, 1.0) + 1e-9
+            )
+            pot_growth = min(pot_growth, 6.0)  # cap at log(403)
+        else:
+            pot_growth = 0.0
+    else:
+        pot_growth = 0.0
+
     return np.array(
         [
             preflop_frac, flop_frac, turn_frac, river_frac,
@@ -196,6 +303,17 @@ def extract_hand_features(hand: Dict[str, Any]) -> np.ndarray:
             blind_frac,
             call_raise_ratio,
             n_actions_norm,
+            # ---- structural / sequence features (v8) ----
+            bigram_diversity,
+            max_consec_run_norm,
+            actor_concentration,
+            actor_entropy,
+            bet_to_pot_mean,
+            bet_to_pot_std,
+            repeat_amount_frac,
+            pot_growth,
+            # placeholder slot for future extension; keeps array length stable
+            0.0,
         ],
         dtype=np.float32,
     )
@@ -203,7 +321,8 @@ def extract_hand_features(hand: Dict[str, Any]) -> np.ndarray:
 
 def extract_chunk_features(chunk: List[Dict[str, Any]]) -> np.ndarray:
     """
-    Return a (76,) float32 feature vector for one chunk of sanitized hands.
+    Return a (4 * _N_HAND_FEATURES,) float32 feature vector for one chunk
+    of sanitized hands. With v8 = 34 per-hand features → 136 chunk features.
 
     Aggregates per-hand features with mean, std, p25, p75.
     The std components are the strongest bot-vs-human discriminators:
@@ -212,7 +331,7 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> np.ndarray:
     if not chunk:
         return np.zeros(4 * _N_HAND_FEATURES, dtype=np.float32)
 
-    hand_mat = np.vstack([extract_hand_features(h) for h in chunk])  # (N, 19)
+    hand_mat = np.vstack([extract_hand_features(h) for h in chunk])  # (N, 34)
 
     means = hand_mat.mean(axis=0)
     stds  = hand_mat.std(axis=0)
@@ -239,6 +358,16 @@ _FEAT_NAMES = [
     "blind_frac",
     "call_raise_ratio",
     "n_actions_norm",
+    # structural / sequence features (v8)
+    "bigram_diversity",
+    "max_consec_run_norm",
+    "actor_concentration",
+    "actor_entropy",
+    "bet_to_pot_mean",
+    "bet_to_pot_std",
+    "repeat_amount_frac",
+    "pot_growth",
+    "reserved_v8_slot",
 ]
 
 assert len(_FEAT_NAMES) == _N_HAND_FEATURES, (
