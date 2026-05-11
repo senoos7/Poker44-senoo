@@ -206,7 +206,17 @@ class Miner(BaseMinerNeuron):
             t0 = time.monotonic()
             ml_scores = self._detector.score_chunks_batch(chunks)
             heuristic_scores = [self._score_chunk_heuristic(chunk) for chunk in chunks]
-            scores = [self._blend(ml, h) for ml, h in zip(ml_scores, heuristic_scores)]
+            blended = [self._blend(ml, h) for ml, h in zip(ml_scores, heuristic_scores)]
+
+            # Within-batch rank stretch: fixes "all chunks ≈ 0.35 → all HUMAN"
+            # collapse on shifted live data. The model's ordering is usually
+            # correct even when its absolute confidence is compressed; this
+            # remaps the blended scores to use the full [0, 1] range while
+            # keeping the original ordering, so AP / AUROC see a proper
+            # discrimination signal and the BOT/HUMAN split tracks the actual
+            # batch composition (typically near 50/50).
+            scores = self._batch_rank_stretch(blended)
+
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             synapse.risk_scores = scores
             predictions = [score >= 0.5 for score in scores]
@@ -229,7 +239,8 @@ class Miner(BaseMinerNeuron):
         bt.logging.info(
             f"[RESPONSE] chunks={len(chunks)} | predicted_bot={n_bot} | predicted_human={n_human} | "
             f"ml_scores={[round(s, 3) for s in ml_scores]} | "
-            f"blended={[round(s, 3) for s in scores]}"
+            f"blended={[round(s, 3) for s in blended]} | "
+            f"final={[round(s, 3) for s in scores]}"
         )
 
         # --- DEBUG: full per-chunk detail ---
@@ -248,6 +259,63 @@ class Miner(BaseMinerNeuron):
     @staticmethod
     def _clamp01(v: float) -> float:
         return max(0.0, min(1.0, v))
+
+    @classmethod
+    def _batch_rank_stretch(
+        cls,
+        scores: List[float],
+        *,
+        rank_weight: float = 0.65,
+        std_floor: float = 0.04,
+    ) -> List[float]:
+        """Stretch a batch of scores to use the full [0, 1] range.
+
+        - Computes percentile rank within the batch (ties get the same rank).
+        - Final score = rank_weight * rank + (1 - rank_weight) * raw_score.
+        - When the batch already has high variance (std > std_floor) we keep
+          most of the raw score; when scores are bunched (current failure
+          mode), we lean on rank position to surface the model's ordering.
+
+        The relative ordering produced by the ML+heuristic blend is preserved,
+        so AP / AUROC are at worst unchanged and typically improve.
+        """
+        n = len(scores)
+        if n <= 1:
+            return [round(cls._clamp01(s), 6) for s in scores]
+
+        mean_s = sum(scores) / n
+        var_s = sum((s - mean_s) ** 2 for s in scores) / n
+        std_s = var_s ** 0.5
+
+        # Adaptive blend: when scores already span a wide range, trust them
+        # more; when they're bunched, lean on rank.
+        if std_s >= std_floor * 4:
+            effective_rank_w = rank_weight * 0.3
+        elif std_s >= std_floor * 2:
+            effective_rank_w = rank_weight * 0.6
+        else:
+            effective_rank_w = rank_weight
+
+        # Tie-aware percentile rank (average rank for ties)
+        sorted_idx = sorted(range(n), key=lambda i: scores[i])
+        rank_pos = [0.0] * n
+        i = 0
+        while i < n:
+            j = i
+            while j + 1 < n and scores[sorted_idx[j + 1]] == scores[sorted_idx[i]]:
+                j += 1
+            avg_rank = (i + j) / 2.0
+            for k in range(i, j + 1):
+                rank_pos[sorted_idx[k]] = avg_rank / max(n - 1, 1)
+            i = j + 1
+
+        out = [
+            cls._clamp01(
+                (1.0 - effective_rank_w) * scores[i] + effective_rank_w * rank_pos[i]
+            )
+            for i in range(n)
+        ]
+        return [round(v, 6) for v in out]
 
     @classmethod
     def _score_hand_heuristic(cls, hand: dict) -> float:
