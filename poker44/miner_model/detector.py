@@ -161,11 +161,36 @@ class BotDetector:
             return
         import time
         try:
-            # Use the actual feature dimension from the loaded model when possible.
+            # Resolve the model's expected feature dimension robustly.
+            # Try in order:
+            #   1. pipeline.n_features_in_                  (sklearn Pipeline)
+            #   2. first step (e.g. StandardScaler).n_features_in_
+            #   3. final estimator's first sub-estimator    (VotingClassifier path)
+            #   4. fallback to len(extract_chunk_features(empty)) → current schema
+            n_features = None
             try:
-                n_features = self._model.estimators_[0].n_features_in_
-            except (AttributeError, IndexError):
-                n_features = 4 * 25  # 100 features (4 stats × 25 per-hand features)
+                n_features = int(self._model.n_features_in_)
+            except AttributeError:
+                pass
+            if n_features is None:
+                try:
+                    first_step = next(iter(self._model.named_steps.values()))
+                    n_features = int(first_step.n_features_in_)
+                except (AttributeError, StopIteration):
+                    pass
+            if n_features is None:
+                try:
+                    clf = self._model.named_steps.get("clf")
+                    inner = clf.estimators_[0] if hasattr(clf, "estimators_") else clf
+                    n_features = int(inner.n_features_in_)
+                except (AttributeError, IndexError):
+                    pass
+            if n_features is None:
+                # Last resort: derive from current feature extractor (always
+                # consistent with the running features.py).
+                from poker44.miner_model.features import extract_chunk_features
+                n_features = int(extract_chunk_features([]).shape[0])
+
             dummy = np.zeros((4, n_features), dtype=np.float32)
             t0 = time.monotonic()
             import warnings
