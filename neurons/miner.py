@@ -60,11 +60,18 @@ class Miner(BaseMinerNeuron):
         except Exception:
             _auto_commit = ""
 
-        # Keep the public manifest version separate from MODEL_VERSION.
-        # MODEL_VERSION controls the local model folder to load, while the
-        # manifest version is dashboard-facing and should not expose internal
-        # experiment names such as v6_benchmark or v7_sigmoid_calib.
-        _model_version = os.getenv("POKER44_MODEL_VERSION", "1.0.5")
+        # Public manifest version MUST match the actual loaded model folder
+        # so that the published identity is verifiable in the repo at
+        # `repo_commit` (per the model integrity policy). The run script sets
+        # POKER44_MODEL_VERSION = MODEL_VERSION; we fall back to the same
+        # MODEL_VERSION value (and ultimately the detector's label) so direct
+        # `python neurons/miner.py` invocations stay compliant too.
+        _model_version = (
+            os.getenv("POKER44_MODEL_VERSION")
+            or os.getenv("MODEL_VERSION")
+            or self._detector.model_label
+            or "default"
+        ).strip() or "default"
 
         self.model_manifest = build_local_model_manifest(
             repo_root=repo_root,

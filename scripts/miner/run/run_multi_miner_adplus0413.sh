@@ -43,12 +43,19 @@ PYTHON="${PYTHON:-$(which python3)}"
 # the old 76-feature set and will cause a dimension mismatch → fallback.
 DEFAULT_MODEL_VERSION="${DEFAULT_MODEL_VERSION:-v6_benchmark}"
 
-# Public manifest labels shown on the dashboard. Keep these generic so the
-# dashboard does not expose internal model folder names such as v6_benchmark
-# or v7_sigmoid_calib. MODEL_VERSION below still controls the actual local
-# model folder that gets loaded by BotDetector.
-PUBLIC_MODEL_NAME="${PUBLIC_MODEL_NAME:-p44-action-profile-detector}"
-PUBLIC_MODEL_VERSION="${PUBLIC_MODEL_VERSION:-1.0.5}"
+# Public manifest model_name shown on the dashboard.
+#
+# IMPORTANT (model integrity policy):
+#   The published identity (model_name/version/commit) MUST match what is
+#   actually running and MUST be verifiable in the public repo. Do NOT use
+#   a runtime override that publishes a fake version while loading a
+#   different one — the new policy treats this as a strict integrity failure.
+#
+#   - PUBLIC_MODEL_NAME: a stable, descriptive name for our miner family.
+#   - PUBLIC_MODEL_VERSION: NOT set globally — it is now derived from each
+#     miner's MODEL_VERSION (see start_all/restart_all below) so the public
+#     manifest reports exactly which model folder is loaded.
+PUBLIC_MODEL_NAME="${PUBLIC_MODEL_NAME:-poker44-rf-bot-detector}"
 
 # Subtensor chain endpoint — use a specific URL to avoid DNS flapping and
 # WebSocket keepalive ping timeouts that crash the miner process.
@@ -174,8 +181,10 @@ start_all() {
     pm2 delete "$_PM2_NAME" 2>/dev/null || true
 
     # shellcheck disable=SC2046
+    # Publish the ACTUAL loaded model folder as the manifest version so the
+    # public identity matches the running model (integrity policy).
     MODEL_VERSION="$_MODEL_VER" \
-    POKER44_MODEL_VERSION="$PUBLIC_MODEL_VERSION" \
+    POKER44_MODEL_VERSION="$_MODEL_VER" \
     POKER44_MODEL_NAME="$PUBLIC_MODEL_NAME" \
     POKER44_MODEL_REPO_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo '')" \
     pm2 start "$MINER_SCRIPT" \
@@ -207,9 +216,11 @@ restart_all() {
   for entry in "${MINERS[@]}"; do
     parse_miner_entry "$entry"
     echo "Restarting: $_PM2_NAME  (wallet=$_WALLET  model=$_MODEL_VER)"
-    # --update-env refreshes MODEL_VERSION in pm2's stored process env
+    # --update-env refreshes MODEL_VERSION in pm2's stored process env.
+    # Publish the ACTUAL loaded model folder as the manifest version so the
+    # public identity matches the running model (integrity policy).
     MODEL_VERSION="$_MODEL_VER" \
-    POKER44_MODEL_VERSION="$PUBLIC_MODEL_VERSION" \
+    POKER44_MODEL_VERSION="$_MODEL_VER" \
     POKER44_MODEL_NAME="$PUBLIC_MODEL_NAME" \
     POKER44_MODEL_REPO_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo '')" \
     pm2 restart "$_PM2_NAME" --update-env 2>/dev/null \
