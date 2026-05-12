@@ -111,12 +111,12 @@ MINERS=(
   "superbit-darnsin  poker-miner-26002  8092  poker44_miner_2   v8_structured"
   "superbit-darnsin  poker-miner-26003  8093  poker44_miner_3   v9_hero"
   "superbit-darnsin  poker-miner-26004  8094  poker44_miner_22  v9_hero"
-  "superbit-darnsin  poker-miner-26005  8201  poker44_miner_25  v7_sigmoid_calib"
   "superbit-darnsin  poker-miner-26006  8100  poker44_miner_26  v9_hero"
-  "superbit-darnsin  poker-miner-26009  8099  poker44_miner_9   v6_benchmark"
-  "superbit-darnsin  poker-miner-26012  8102  poker44_miner_12  v6_benchmark"
-  "superbit-darnsin  poker-miner-26015  8105  poker44_miner_15  v6_benchmark"
+  "superbit-darnsin  poker-miner-26007  8101  poker44_miner_27  v8_structured"
+  "superbit-darnsin  poker-miner-26008  8102  poker44_miner_28  v8_structured"
+  "superbit-darnsin  poker-miner-26012  8103  poker44_miner_12  v6_benchmark"
   "superbit-darnsin  poker-miner-26021  8111  poker44_miner_21  v7_sigmoid_calib"
+  "superbit-darnsin  poker-miner-26005  8201  poker44_miner_25  v7_sigmoid_calib"
 )
 
 # ----------------------------------------------------------------
