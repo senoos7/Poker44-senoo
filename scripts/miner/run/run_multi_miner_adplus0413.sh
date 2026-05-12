@@ -97,19 +97,22 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # ----------------------------------------------------------------
 MINERS=(
   # wallet-name           hotkey               port  pm2-name            model-version
-  # v8_structured  : new ensemble (HistGBM + ExtraTrees + LogReg) on
-  #                  136 features incl. structural / sequence signals
-  #                  (bigram diversity, actor concentration, pot-relative
-  #                  sizing, repeat amounts). A/B on 2 miners.
-  # v7_sigmoid_calib: shallow uncalibrated HistGBM (graded probabilities).
-  # v6_benchmark    : default isotonic-calibrated HistGBM.
-  # All models retrained on the latest benchmark dataset (incl. 2026-05-08).
-  "superbit-darnsin  poker-miner-26001  8091  poker44_miner_1   v8_structured"
-  "superbit-darnsin  poker-miner-26002  8092  poker44_miner_2   v7_sigmoid_calib"
-  "superbit-darnsin  poker-miner-26003  8093  poker44_miner_3   v6_benchmark"
-  "superbit-darnsin  poker-miner-26004  8094  poker44_miner_22  v6_benchmark"
+  # v9_hero (PRIMARY BET) : HGBM(depth=4, hero-aware) + sigmoid calibration
+  #                         on 172 features incl. 9 NEW hero-specific
+  #                         features. Cohen's d > 3 on hero_call_frac /
+  #                         hero_raise_frac / hero_unique_amt_ratio against
+  #                         the v1.1 benchmark. Largest A/B group.
+  # v8_structured (control): ensemble retrained on 172-feature set (control
+  #                          group for v9 comparison).
+  # v7_sigmoid_calib       : shallow uncalibrated HGBM (graded probabilities).
+  # v6_benchmark           : isotonic-calibrated HGBM (legacy baseline).
+  # All four models retrained 2026-05-12 on benchmark dates ≤ 2026-05-08.
+  "superbit-darnsin  poker-miner-26001  8091  poker44_miner_1   v9_hero"
+  "superbit-darnsin  poker-miner-26002  8092  poker44_miner_2   v8_structured"
+  "superbit-darnsin  poker-miner-26003  8093  poker44_miner_3   v9_hero"
+  "superbit-darnsin  poker-miner-26004  8094  poker44_miner_22  v9_hero"
   "superbit-darnsin  poker-miner-26005  8201  poker44_miner_25  v7_sigmoid_calib"
-  "superbit-darnsin  poker-miner-26006  8100  poker44_miner_26  v8_structured"
+  "superbit-darnsin  poker-miner-26006  8100  poker44_miner_26  v9_hero"
   "superbit-darnsin  poker-miner-26009  8099  poker44_miner_9   v6_benchmark"
   "superbit-darnsin  poker-miner-26012  8102  poker44_miner_12  v6_benchmark"
   "superbit-darnsin  poker-miner-26015  8105  poker44_miner_15  v6_benchmark"

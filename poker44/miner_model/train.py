@@ -357,6 +357,8 @@ def build_training_matrix(
 
 def train_model(X: np.ndarray, y: np.ndarray, version: str = "") -> Any:
     """Dispatch to the appropriate model architecture based on version name."""
+    if version.startswith("v9") or "hero" in version:
+        return _train_model_v9_hero(X, y)
     if (version.startswith("v8") or "structured" in version or "ensemble" in version):
         return _train_model_v8_structured(X, y)
     if version.startswith("v7") or "sigmoid" in version or "direct" in version:
@@ -748,6 +750,8 @@ def _save_metadata(
         "n_human_chunks": _n_human,
         "chunk_size_range": [_CHUNK_SIZE_MIN, _CHUNK_SIZE_MAX],
         "model_type": (
+            "Pipeline(StandardScaler + CalibratedClassifierCV(HistGradientBoosting(depth=4, hero-aware), sigmoid, cv=3))"
+            if (version.startswith("v9") or "hero" in version) else
             "Pipeline(StandardScaler + Voting(HistGBM + ExtraTrees + LogReg))"
             if (version.startswith("v8") or "structured" in version or "ensemble" in version) else
             "Pipeline(StandardScaler + HistGradientBoosting(depth=2, uncalibrated))"
@@ -810,13 +814,118 @@ def _print_comparison_hint(version_dir: Path) -> None:
 # Main
 # ------------------------------------------------------------------
 
+def _train_model_v9_hero(X: np.ndarray, y: np.ndarray):
+    """
+    Hero-aware HGBM with sigmoid calibration (v9 architecture).
+
+    Designed to exploit the 9 new hero-specific features in features.py
+    (`hero_call_frac`, `hero_raise_frac`, `hero_unique_amt_ratio`, etc.) which
+    show Cohen's d > 3 against the v1.1 benchmark — by far the strongest
+    discriminators we've measured.
+
+    Architecture choices:
+    - Single HistGradientBoostingClassifier (deeper than v7) wrapped with
+      CalibratedClassifierCV(method="sigmoid"). Deeper trees so the model can
+      build interactions between hero features and the structural v8 features;
+      sigmoid calibration to keep outputs graded on shifted live data.
+    - learning_rate=0.05 + max_iter=200 + early_stopping. Slow & steady to
+      reduce overfitting (the benchmark gives perfect CV which is a warning
+      sign for distribution shift).
+    - max_depth=4, min_samples_leaf=40 — deeper than v7 (depth=2) to capture
+      hero × all-seat interactions, but still regularized.
+    - class_weight=None on the underlying HGBM (benchmark is exactly 50/50).
+
+    Why this is expected to outperform v6/v7/v8 on live:
+    - Hero-specific features are precisely "is this seat acting like a bot?"
+      restricted to the labeled seat. v6-v8 were averaging the bot's signal
+      with the noise from 5+ other seats per hand.
+    """
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    from sklearn.calibration import CalibratedClassifierCV
+    from sklearn.model_selection import StratifiedKFold, cross_val_score, cross_val_predict
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    n_samples, n_features = X.shape
+    print(f"\n  [HGBM v9 hero-aware] Training on {n_samples} chunks × {n_features} features")
+    print(f"  Class balance: {y.sum()} bot / {(1-y).sum()} human")
+
+    base = HistGradientBoostingClassifier(
+        max_iter=200,
+        max_depth=4,
+        min_samples_leaf=40,
+        learning_rate=0.05,
+        l2_regularization=0.5,
+        max_bins=63,
+        early_stopping=True,
+        validation_fraction=0.1,
+        n_iter_no_change=15,
+        random_state=42,
+    )
+    model = Pipeline([
+        ("scaler", StandardScaler()),
+        ("clf", CalibratedClassifierCV(base, cv=3, method="sigmoid")),
+    ])
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    print("\n  Running 5-fold cross-validation (average_precision)...")
+    cv_ap  = cross_val_score(model, X, y, cv=cv, scoring="average_precision", n_jobs=1)
+    cv_acc = cross_val_score(model, X, y, cv=cv, scoring="accuracy",           n_jobs=1)
+    print(f"  CV AP:     {cv_ap.mean():.4f} ± {cv_ap.std():.4f}")
+    print(f"  CV Acc:    {cv_acc.mean():.4f} ± {cv_acc.std():.4f}")
+
+    cv_probs = cross_val_predict(model, X, y, cv=cv, method="predict_proba")[:, 1]
+    bot_scores   = cv_probs[y == 1]
+    human_scores = cv_probs[y == 0]
+    print(f"\n  Score distribution (graded probabilities):")
+    print(f"    Bot chunks:   mean={bot_scores.mean():.3f}  std={bot_scores.std():.3f}"
+          f"  pct_above_0.5={100*np.mean(bot_scores > 0.5):.1f}%")
+    print(f"    Human chunks: mean={human_scores.mean():.3f}  std={human_scores.std():.3f}"
+          f"  pct_below_0.5={100*np.mean(human_scores < 0.5):.1f}%")
+    ambiguous = np.mean((cv_probs > 0.3) & (cv_probs < 0.7))
+    print(f"    In 0.3–0.7 range: {100*ambiguous:.1f}%")
+
+    print("\n  Fitting final model on full dataset...")
+    model.fit(X, y)
+
+    top_features = []
+    try:
+        # Get feature importance from the first calibrated HGBM (averaged
+        # importances across calibrated_classifiers_ folds)
+        clf = model.named_steps["clf"]
+        importances = np.zeros(n_features)
+        n_inner = 0
+        for inner_cal in clf.calibrated_classifiers_:
+            inner = inner_cal.estimator
+            if hasattr(inner, "feature_importances_"):
+                importances += inner.feature_importances_
+                n_inner += 1
+        if n_inner > 0:
+            importances /= n_inner
+            top_idx = np.argsort(importances)[::-1][:15]
+            print("\n  Top 15 features by importance:")
+            for rank, idx in enumerate(top_idx, 1):
+                name = CHUNK_FEATURE_NAMES[idx] if idx < len(CHUNK_FEATURE_NAMES) else f"feat_{idx}"
+                marker = "  ★ HERO" if "hero_" in name else ""
+                print(f"    {rank:>2}. {name:<35} {importances[idx]:.4f}{marker}")
+                top_features.append({
+                    "rank": rank, "name": name,
+                    "importance": round(float(importances[idx]), 4),
+                })
+    except Exception as exc:
+        print(f"  (Feature importance skipped: {exc})")
+
+    return model, cv_ap, cv_acc, top_features
+
+
 def _is_hgbm_version(version: str) -> bool:
     return (version.startswith("v3") or version.startswith("v5")
             or version.startswith("v6") or version.startswith("v7")
-            or version.startswith("v8")
+            or version.startswith("v8") or version.startswith("v9")
             or "gb" in version or "hgbm" in version
             or "structured" in version or "ensemble" in version
-            or "benchmark" in version or "sigmoid" in version or "direct" in version)
+            or "benchmark" in version or "sigmoid" in version or "direct" in version
+            or "hero" in version)
 
 
 def main(
