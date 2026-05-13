@@ -401,6 +401,21 @@ def extract_hand_features(hand: Dict[str, Any]) -> np.ndarray:
     )
 
 
+def extract_hand_matrix(chunk: List[Dict[str, Any]]) -> np.ndarray:
+    """
+    Return a (n_hands, _N_HAND_FEATURES) float32 matrix WITHOUT chunk-level
+    aggregation. Used by sequence models (v10+) that need to learn temporal
+    relationships between hands within a chunk, instead of relying only on
+    mean/std/p25/p75 summaries.
+
+    For an empty chunk returns an empty (0, _N_HAND_FEATURES) array so the
+    consumer can decide on padding strategy.
+    """
+    if not chunk:
+        return np.zeros((0, _N_HAND_FEATURES), dtype=np.float32)
+    return np.vstack([extract_hand_features(h) for h in chunk]).astype(np.float32)
+
+
 def extract_chunk_features(chunk: List[Dict[str, Any]]) -> np.ndarray:
     """
     Return a (4 * _N_HAND_FEATURES,) float32 feature vector for one chunk

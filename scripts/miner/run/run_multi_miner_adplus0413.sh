@@ -97,26 +97,30 @@ ALLOWED_VALIDATOR_HOTKEYS="${ALLOWED_VALIDATOR_HOTKEYS:-${_DEFAULT_VALIDATOR_HOT
 # ----------------------------------------------------------------
 MINERS=(
   # wallet-name           hotkey               port  pm2-name            model-version
-  # v9_hero (PRIMARY BET) : HGBM(depth=4, hero-aware) + sigmoid calibration
-  #                         on 172 features incl. 9 NEW hero-specific
-  #                         features. Cohen's d > 3 on hero_call_frac /
-  #                         hero_raise_frac / hero_unique_amt_ratio against
-  #                         the v1.1 benchmark. Largest A/B group.
-  # v8_structured (control): ensemble retrained on 172-feature set (control
-  #                          group for v9 comparison).
-  # v7_sigmoid_calib       : shallow uncalibrated HGBM (graded probabilities).
-  # v6_benchmark           : isotonic-calibrated HGBM (legacy baseline).
-  # All four models retrained 2026-05-12 on benchmark dates ≤ 2026-05-08.
-  "superbit-darnsin  poker-miner-26001  8091  poker44_miner_1   v9_hero"
-  "superbit-darnsin  poker-miner-26002  8092  poker44_miner_2   v8_structured"
-  "superbit-darnsin  poker-miner-26003  8093  poker44_miner_3   v9_hero"
-  "superbit-darnsin  poker-miner-26004  8094  poker44_miner_22  v9_hero"
-  "superbit-darnsin  poker-miner-26006  8100  poker44_miner_26  v9_hero"
-  "superbit-darnsin  poker-miner-26007  8101  poker44_miner_27  v8_structured"
-  "superbit-darnsin  poker-miner-26008  8102  poker44_miner_28  v8_structured"
-  "superbit-darnsin  poker-miner-26012  8103  poker44_miner_12  v6_benchmark"
+  # v10_seq (NEW PRIMARY BET) : Bi-LSTM (hidden=64, 1 layer) over per-hand
+  #                              sequences with attention pooling, label-
+  #                              smoothed (smoothing=0.05) so it stays graded
+  #                              under distribution shift. ~120 ms per
+  #                              40-chunk batch on CPU. Identifies different
+  #                              borderline cases than v9 (only 3/20 uncertain
+  #                              overlap) — provides orthogonal signal that
+  #                              tree-based models cannot. Largest A/B group.
+  # v9_hero (control / baseline): HGBM(depth=4, hero-aware) + sigmoid calib
+  #                                on 172 features. Currently rank #8/#9.
+  # v8_structured (legacy)      : ensemble; kept on 1 miner as deeper baseline.
+  # v7_sigmoid_calib            : graded HGBM, kept on 1 miner.
+  # v6_benchmark                : legacy isotonic HGBM, kept on 1 miner.
+  # All five variants retrained 2026-05-12 on benchmark dates ≤ 2026-05-08.
+  "superbit-darnsin  poker-miner-26001  8091  poker44_miner_1   v10_seq"
+  "superbit-darnsin  poker-miner-26002  8092  poker44_miner_2   v10_seq"
+  "superbit-darnsin  poker-miner-26003  8093  poker44_miner_3   v10_seq"
+  "superbit-darnsin  poker-miner-26004  8094  poker44_miner_22  v10_seq"
+  "superbit-darnsin  poker-miner-26006  8100  poker44_miner_26  v10_seq"
+  "superbit-darnsin  poker-miner-26007  8101  poker44_miner_27  v9_hero"
+  "superbit-darnsin  poker-miner-26008  8102  poker44_miner_28  v9_hero"
+  "superbit-darnsin  poker-miner-26012  8103  poker44_miner_12  v8_structured"
   "superbit-darnsin  poker-miner-26021  8111  poker44_miner_21  v7_sigmoid_calib"
-  "superbit-darnsin  poker-miner-26005  8201  poker44_miner_25  v7_sigmoid_calib"
+  "superbit-darnsin  poker-miner-26005  8201  poker44_miner_25  v6_benchmark"
 )
 
 # ----------------------------------------------------------------

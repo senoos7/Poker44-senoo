@@ -90,7 +90,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from poker44.miner_model.features import extract_chunk_features, CHUNK_FEATURE_NAMES
+from poker44.miner_model.features import (
+    extract_chunk_features,
+    CHUNK_FEATURE_NAMES,
+    _N_HAND_FEATURES,
+)
 from poker44.miner_model.sanitize import sanitize_hand
 
 # ------------------------------------------------------------------
@@ -355,6 +359,17 @@ def build_training_matrix(
 # Model training
 # ------------------------------------------------------------------
 
+def _is_sequence_version(version: str) -> bool:
+    """v10+ versions train on raw hand sequences instead of chunk aggregates."""
+    return (
+        version.startswith("v10")
+        or version.startswith("v11")
+        or "seq" in version
+        or "lstm" in version
+        or "transformer" in version
+    )
+
+
 def train_model(X: np.ndarray, y: np.ndarray, version: str = "") -> Any:
     """Dispatch to the appropriate model architecture based on version name."""
     if version.startswith("v9") or "hero" in version:
@@ -366,6 +381,256 @@ def train_model(X: np.ndarray, y: np.ndarray, version: str = "") -> Any:
     if _is_hgbm_version(version):
         return _train_model_v3_hgbm(X, y)
     return _train_model_v2_rf(X, y)
+
+
+def _train_model_v10_seq(
+    bot_chunks: List[List[Dict[str, Any]]],
+    human_chunks: List[List[Dict[str, Any]]],
+    *,
+    seed: int = 42,
+):
+    """
+    Train a 1-layer Bi-LSTM over per-hand feature sequences.
+
+    Why this can outperform v9_hero:
+    - v9 collapses each chunk to four moments (mean/std/p25/p75) of the
+      per-hand vector, throwing away ALL between-hand structure.
+    - A bot session is, by definition, the same player across ~60 hands;
+      the temporal regularity of "same hero, same patterns" is a stronger
+      signal than any single summary statistic.
+    - Top dashboard model `poker44_ml13tens1` (composite ≈ 0.61) appears
+      to use a tensor architecture; v10 is our small-CPU answer to that.
+
+    Returns the same 4-tuple as the sklearn trainers so the rest of the
+    pipeline (metadata, comparison table) keeps working.
+    """
+    import torch
+    import torch.nn as nn
+    from poker44.miner_model.seq_model import (
+        HandSeqClassifier,
+        SequenceModelWrapper,
+        chunks_to_padded_batch,
+    )
+    from sklearn.metrics import average_precision_score, roc_auc_score
+    from sklearn.model_selection import StratifiedKFold
+
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    n_features = _N_HAND_FEATURES
+    hidden = 64
+    num_layers = 1
+    max_hands = 120  # benchmark goes up to 80; live goes up to ~88
+
+    # --- Materialise tensors once -------------------------------------
+    print("\n  [v10 seq-LSTM] Encoding chunks → padded tensors...")
+    all_chunks = bot_chunks + human_chunks
+    y = np.concatenate([
+        np.ones(len(bot_chunks), dtype=np.float32),
+        np.zeros(len(human_chunks), dtype=np.float32),
+    ])
+    x_np, mask_np = chunks_to_padded_batch(all_chunks, max_hands=max_hands)
+    print(f"  shape: x={x_np.shape}  mask={mask_np.shape}  pos={int(y.sum())}/{len(y)}")
+
+    x_t = torch.from_numpy(x_np)
+    m_t = torch.from_numpy(mask_np)
+    y_t = torch.from_numpy(y)
+
+    device = torch.device("cpu")  # CPU-only deployment target
+    torch.set_num_threads(4)  # train on 4 threads, infer on 1
+
+    # --- Train + held-out 20% validation, then 3-fold CV --------------
+    rng = np.random.default_rng(seed)
+    cv_ap_scores: List[float] = []
+    cv_acc_scores: List[float] = []
+    cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=seed)
+    print("\n  Running 3-fold cross-validation...")
+    for fold, (tr_idx, va_idx) in enumerate(cv.split(x_np, y), start=1):
+        ap, acc = _train_seq_one_fold(
+            x_t, m_t, y_t, tr_idx, va_idx,
+            n_features=n_features, hidden=hidden, num_layers=num_layers,
+            device=device, fold_label=f"fold {fold}",
+        )
+        cv_ap_scores.append(ap)
+        cv_acc_scores.append(acc)
+    cv_ap = np.array(cv_ap_scores)
+    cv_acc = np.array(cv_acc_scores)
+    print(f"\n  CV AP:  {cv_ap.mean():.4f} ± {cv_ap.std():.4f}")
+    print(f"  CV Acc: {cv_acc.mean():.4f} ± {cv_acc.std():.4f}")
+
+    # --- Final fit on full data ---------------------------------------
+    print("\n  Fitting final model on full dataset...")
+    final_model = HandSeqClassifier(
+        n_features=n_features, hidden=hidden, num_layers=num_layers, dropout=0.2,
+    ).to(device)
+    final_model.train()
+    _train_seq_loop(
+        final_model, x_t, m_t, y_t,
+        idx=np.arange(len(y)),
+        val_idx=None,
+        device=device,
+        max_epochs=40,
+        batch_size=64,
+    )
+    final_model.eval()
+
+    # Wrap for pickling
+    config = {
+        "n_features": n_features,
+        "hidden": hidden,
+        "num_layers": num_layers,
+        "max_hands": max_hands,
+        "torch_version": torch.__version__,
+        "arch": "HandSeqClassifier(BiLSTM+attn)",
+    }
+    state_dict = {k: v.detach().cpu() for k, v in final_model.state_dict().items()}
+    wrapper = SequenceModelWrapper(config=config, state_dict=state_dict)
+
+    # Surface a few "feature importances" by permutation on a small sample
+    top_features: List[Dict[str, Any]] = []
+    try:
+        from poker44.miner_model.features import _FEAT_NAMES
+        sample_n = min(400, len(y))
+        idx = rng.choice(len(y), size=sample_n, replace=False)
+        base_logits = _seq_predict_logits(
+            final_model, x_t[idx], m_t[idx], device,
+        )
+        base_ap = average_precision_score(y[idx], base_logits)
+        importances = []
+        for f in range(n_features):
+            x_perm = x_t[idx].clone()
+            perm = torch.randperm(x_perm.shape[1])
+            x_perm[:, :, f] = x_perm[:, perm, f]  # shuffle this feature across time
+            new_logits = _seq_predict_logits(final_model, x_perm, m_t[idx], device)
+            new_ap = average_precision_score(y[idx], new_logits)
+            importances.append((f, base_ap - new_ap))
+        importances.sort(key=lambda kv: kv[1], reverse=True)
+        print("\n  Top 12 features by permutation importance:")
+        for rank, (fi, drop) in enumerate(importances[:12], start=1):
+            name = _FEAT_NAMES[fi]
+            marker = "  ★ HERO" if name.startswith("hero_") else ""
+            print(f"    {rank:>2}. {name:<28} ΔAP={drop:.4f}{marker}")
+            top_features.append({
+                "rank": rank, "name": name,
+                "importance": round(float(drop), 4),
+            })
+    except Exception as exc:
+        print(f"  (Permutation importance skipped: {exc})")
+
+    return wrapper, cv_ap, cv_acc, top_features
+
+
+def _train_seq_one_fold(
+    x_t, m_t, y_t, tr_idx, va_idx, *,
+    n_features: int, hidden: int, num_layers: int,
+    device, fold_label: str,
+) -> Tuple[float, float]:
+    """Train one CV fold and return (val AP, val accuracy)."""
+    import torch
+    from poker44.miner_model.seq_model import HandSeqClassifier
+
+    model = HandSeqClassifier(
+        n_features=n_features, hidden=hidden, num_layers=num_layers, dropout=0.2,
+    ).to(device)
+    val_probs, val_y = _train_seq_loop(
+        model, x_t, m_t, y_t,
+        idx=tr_idx, val_idx=va_idx, device=device,
+        max_epochs=30, batch_size=64,
+    )
+    from sklearn.metrics import average_precision_score, accuracy_score
+    ap = float(average_precision_score(val_y, val_probs))
+    acc = float(accuracy_score(val_y, (val_probs >= 0.5).astype(int)))
+    print(f"    {fold_label}: AP={ap:.4f}  acc={acc:.4f}")
+    return ap, acc
+
+
+def _train_seq_loop(
+    model, x_t, m_t, y_t, *,
+    idx: np.ndarray,
+    val_idx,
+    device,
+    max_epochs: int,
+    batch_size: int,
+    label_smoothing: float = 0.05,
+):
+    """Plain BCE-with-logits loop with optional early stopping on val AP.
+
+    Label smoothing maps {0, 1} targets to {smoothing, 1 - smoothing}, which
+    keeps the model from saturating its sigmoid outputs at 0.000 / 1.000 on a
+    benchmark this easy. Saturated outputs collapse the score distribution
+    when the data shifts (humanized bots), so the rank-stretch in miner.py
+    has nothing to work with. With smoothing=0.05, outputs settle around
+    [0.05, 0.95] on training and stay graded on borderline live cases.
+    """
+    import torch
+    import torch.nn as nn
+
+    model.to(device)
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    loss_fn = nn.BCEWithLogitsLoss()
+    smooth = float(label_smoothing)
+
+    best_val_ap = -1.0
+    best_state = None
+    patience = 6
+    bad = 0
+    rng = np.random.default_rng(0)
+
+    for epoch in range(1, max_epochs + 1):
+        model.train()
+        order = rng.permutation(len(idx))
+        for i in range(0, len(order), batch_size):
+            batch = idx[order[i:i + batch_size]]
+            xb = x_t[batch].to(device)
+            mb = m_t[batch].to(device)
+            yb = y_t[batch].to(device)
+            # Label smoothing: shift {0, 1} → {smooth, 1-smooth}
+            yb_smooth = yb * (1.0 - 2 * smooth) + smooth
+            logits = model(xb, mb)
+            loss = loss_fn(logits, yb_smooth)
+            opt.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            opt.step()
+
+        if val_idx is None:
+            continue
+
+        model.eval()
+        val_probs = _seq_predict_logits(
+            model, x_t[val_idx], m_t[val_idx], device,
+        )
+        from sklearn.metrics import average_precision_score
+        val_ap = float(average_precision_score(y_t[val_idx].numpy(), val_probs))
+
+        if val_ap > best_val_ap + 1e-4:
+            best_val_ap = val_ap
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            bad = 0
+        else:
+            bad += 1
+            if bad >= patience:
+                break
+
+    if val_idx is None:
+        return None, None
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    val_probs = _seq_predict_logits(model, x_t[val_idx], m_t[val_idx], device)
+    return val_probs, y_t[val_idx].numpy()
+
+
+def _seq_predict_logits(model, xb, mb, device, batch: int = 256) -> np.ndarray:
+    """Run the sequence model in eval mode over xb/mb and return prob array."""
+    import torch
+    model.eval()
+    out = np.empty(xb.shape[0], dtype=np.float32)
+    with torch.inference_mode():
+        for i in range(0, xb.shape[0], batch):
+            xs = xb[i:i + batch].to(device)
+            ms = mb[i:i + batch].to(device)
+            out[i:i + batch] = torch.sigmoid(model(xs, ms)).cpu().numpy()
+    return out
 
 
 def _train_model_v2_rf(X: np.ndarray, y: np.ndarray):
@@ -750,6 +1015,8 @@ def _save_metadata(
         "n_human_chunks": _n_human,
         "chunk_size_range": [_CHUNK_SIZE_MIN, _CHUNK_SIZE_MAX],
         "model_type": (
+            "SequenceModelWrapper(BiLSTM hidden=64 + attention pool + MLP head)"
+            if _is_sequence_version(version) else
             "Pipeline(StandardScaler + CalibratedClassifierCV(HistGradientBoosting(depth=4, hero-aware), sigmoid, cv=3))"
             if (version.startswith("v9") or "hero" in version) else
             "Pipeline(StandardScaler + Voting(HistGBM + ExtraTrees + LogReg))"
@@ -985,10 +1252,19 @@ def main(
         print(f"  Sanitized {len(bot_chunks)} bot + {len(human_chunks)} human chunks")
 
     # ---- Step 3: features + train ----
-    arch = "HistGBM" if _is_hgbm_version(version) else "RandomForest"
-    print(f"\n[TRAIN] Building feature matrix + training {arch}...")
-    X, y = build_training_matrix(bot_chunks, human_chunks)
-    model, cv_ap, cv_acc, top_features = train_model(X, y, version=version)
+    if _is_sequence_version(version):
+        print(f"\n[TRAIN] Sequence model — skipping aggregate matrix, using raw chunks.")
+        model, cv_ap, cv_acc, top_features = _train_model_v10_seq(
+            bot_chunks, human_chunks, seed=seed,
+        )
+        # for metadata: report the per-hand feature count, not aggregates
+        n_features_meta = _N_HAND_FEATURES
+    else:
+        arch = "HistGBM" if _is_hgbm_version(version) else "RandomForest"
+        print(f"\n[TRAIN] Building feature matrix + training {arch}...")
+        X, y = build_training_matrix(bot_chunks, human_chunks)
+        model, cv_ap, cv_acc, top_features = train_model(X, y, version=version)
+        n_features_meta = X.shape[1]
 
     # ---- Step 4: save model ----
     with open(output_path, "wb") as f:
@@ -1007,7 +1283,7 @@ def main(
         cv_acc=cv_acc,
         top_features=top_features,
         training_seconds=training_seconds,
-        n_features=X.shape[1],
+        n_features=n_features_meta,
         n_bot_chunks=len(bot_chunks),
         n_human_chunks=len(human_chunks),
     )

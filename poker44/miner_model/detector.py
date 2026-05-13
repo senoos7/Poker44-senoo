@@ -244,19 +244,25 @@ class BotDetector:
         try:
             import time
             import warnings
+            is_seq = bool(getattr(self._model, "_is_sequence_model", False))
             t_feat = time.monotonic()
-            feature_matrix = np.stack([
-                extract_chunk_features(chunk) for chunk in chunks
-            ])
+            if is_seq:
+                # Sequence model consumes raw chunks directly; feature extraction
+                # happens inside the wrapper (per-hand matrix + padding).
+                model_input: Any = chunks
+            else:
+                model_input = np.stack([
+                    extract_chunk_features(chunk) for chunk in chunks
+                ])
             t_pred = time.monotonic()
             with warnings.catch_warnings(), _limit_threads():
                 warnings.simplefilter("ignore")
-                probs = self._model.predict_proba(feature_matrix)[:, 1]
+                probs = self._model.predict_proba(model_input)[:, 1]
             t_done = time.monotonic()
             bt.logging.debug(
                 f"[BotDetector] feat={t_pred-t_feat:.3f}s "
                 f"predict={t_done-t_pred:.3f}s "
-                f"n={len(chunks)}"
+                f"n={len(chunks)} seq={is_seq}"
             )
             return [float(np.clip(p - _SCORE_BIAS, 0.0, 1.0)) for p in probs]
         except ValueError as exc:
@@ -281,12 +287,16 @@ class BotDetector:
     # ------------------------------------------------------------------
 
     def _score_with_model(self, chunk: List[Dict[str, Any]]) -> float:
-        feats = extract_chunk_features(chunk).reshape(1, -1)
+        is_seq = bool(getattr(self._model, "_is_sequence_model", False))
+        if is_seq:
+            model_input: Any = [chunk]
+        else:
+            model_input = extract_chunk_features(chunk).reshape(1, -1)
         try:
             import warnings
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                prob = float(self._model.predict_proba(feats)[0, 1])
+                prob = float(self._model.predict_proba(model_input)[0, 1])
         except ValueError as exc:
             # Feature dimension mismatch: old model trained on different feature count.
             # Fall back to heuristic and warn once.
@@ -300,7 +310,7 @@ class BotDetector:
                 self._feature_mismatch = True
             return self._score_heuristic(chunk)
         except AttributeError:
-            prob = float(self._model.predict(feats)[0])
+            prob = float(self._model.predict(model_input)[0])
 
         # Apply conservative bias: push borderline scores below the validator's
         # 0.5 rounding threshold to reduce false positives on human chunks.
