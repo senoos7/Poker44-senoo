@@ -116,39 +116,79 @@ class BotDetector:
     The model loaded is determined by MODEL_VERSION env var (see module docstring).
     """
 
+    # Built-in fallback chain: if MODEL_VERSION fails to load (e.g. torch
+    # missing for v10_seq, or feature-dim mismatch on an old pickle), the
+    # detector tries each of these versions in turn before giving up to the
+    # heuristic. Override with MODEL_FALLBACK_VERSIONS=v9_hero,v8_structured.
+    _DEFAULT_FALLBACK_CHAIN = ("v9_hero", "v8_structured", "v7_sigmoid_calib", "v6_benchmark")
+
     def __init__(self, model_path: Optional[Path] = None):
         self._model = None
+        self._requested_version = os.environ.get("MODEL_VERSION", "default").strip() or "default"
         self._model_path = model_path if model_path is not None else _resolve_model_path()
-        self._model_version = os.environ.get("MODEL_VERSION", "default").strip() or "default"
+        # Effective version after fallback resolution; reported via model_label.
+        self._model_version = self._requested_version
         self._feature_mismatch = False
-        self._load_model()
+        self._load_model_with_fallbacks()
 
-    def _load_model(self) -> None:
-        if self._model_path.exists():
+    def _load_one(self, model_path: Path, version_label: str) -> bool:
+        """Load a single model.pkl. Returns True on success, False on any error."""
+        if not model_path.exists():
+            return False
+        bt.logging.info(
+            f"[BotDetector] Loading model version={version_label!r} "
+            f"from {model_path} ({model_path.stat().st_size:,} bytes)"
+        )
+        try:
+            with open(model_path, "rb") as f:
+                self._model = pickle.load(f)
             bt.logging.info(
-                f"[BotDetector] Loading model version={self._model_version!r} "
-                f"from {self._model_path} ({self._model_path.stat().st_size:,} bytes)"
+                f"[BotDetector] Model loaded: {type(self._model).__name__} "
+                f"(version={version_label!r})"
             )
-            try:
-                with open(self._model_path, "rb") as f:
-                    self._model = pickle.load(f)
-                bt.logging.info(
-                    f"[BotDetector] Model loaded: {type(self._model).__name__} "
-                    f"(version={self._model_version!r})"
-                )
-                self._warmup_model()
-            except Exception as exc:
-                bt.logging.error(
-                    f"[BotDetector] Failed to load model from {self._model_path}: {exc}\n"
-                    f"{traceback.format_exc()}"
-                )
-                self._model = None
-        else:
-            bt.logging.warning(
-                f"[BotDetector] No model at {self._model_path} "
-                f"(version={self._model_version!r}). Using heuristic fallback. "
-                f"Run: python -m poker44.miner_model.train --version {self._model_version}"
+            self._model_version = version_label
+            self._warmup_model()
+            return True
+        except Exception as exc:
+            bt.logging.error(
+                f"[BotDetector] Failed to load model from {model_path}: {exc}"
             )
+            bt.logging.debug(traceback.format_exc())
+            self._model = None
+            return False
+
+    def _load_model_with_fallbacks(self) -> None:
+        # 1) Primary: requested version (or default model.pkl)
+        if self._load_one(self._model_path, self._requested_version):
+            return
+
+        # 2) Fallback chain (env override or built-in defaults)
+        env_chain = os.environ.get("MODEL_FALLBACK_VERSIONS", "").strip()
+        chain = (
+            [v.strip() for v in env_chain.split(",") if v.strip()]
+            if env_chain
+            else list(self._DEFAULT_FALLBACK_CHAIN)
+        )
+        # Don't try the same version twice
+        chain = [v for v in chain if v != self._requested_version]
+
+        for fallback_ver in chain:
+            fallback_path = _MODEL_DIR / "models" / fallback_ver / "model.pkl"
+            if fallback_path.exists():
+                bt.logging.warning(
+                    f"[BotDetector] Primary model {self._requested_version!r} unavailable; "
+                    f"trying fallback {fallback_ver!r}."
+                )
+                if self._load_one(fallback_path, fallback_ver):
+                    return
+
+        # 3) All fallbacks exhausted
+        bt.logging.warning(
+            f"[BotDetector] No model could be loaded "
+            f"(requested={self._requested_version!r}, fallbacks={chain}). "
+            f"Using heuristic fallback. "
+            f"Run: python -m poker44.miner_model.train --version {self._requested_version}"
+        )
 
     def _warmup_model(self) -> None:
         """Run a dummy prediction to initialize BLAS/OpenMP thread pools.
